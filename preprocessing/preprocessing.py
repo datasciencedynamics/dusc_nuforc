@@ -57,6 +57,10 @@ def main(
     df = pd.read_parquet(input_data_file)
     print(f"Raw data shape: {df.shape}")
 
+    # Lowercase all column names immediately — must happen before any column
+    # references below, and unconditionally so inference sees the same names.
+    df.columns = df.columns.str.lower()
+
     # Set index if not already set
     if df.index.name != var_index:
         try:
@@ -73,19 +77,17 @@ def main(
     ############################################################################
     # Step 2. Build Target Variable (training only)
     ############################################################################
-    # Media=Y  --> 1 (witness submitted photo/video with report)
+    # Media=Y   --> 1 (witness submitted photo/video with report)
     # Media=NaN --> 0 (no media submitted)
     # At inference time the target column won't exist — skip silently.
     ############################################################################
 
     if stage == "training":
-        df["media"] = (df["Media"] == "Y").astype(int)
+        df["media"] = (df["media"] == "Y").astype(int)
         print("*" * 80)
         print(f"\nTarget distribution:\n{df['media'].value_counts()}")
-        print(f"\nPositive rate: {df['media'].mean()*100}%")
+        print(f"\nPositive rate: {df['media'].mean() * 100:.1f}%")
         print("*" * 80)
-
-        df.columns = df.columns.str.lower()  # lowercase column names for consistency
 
     ############################################################################
     # Step 3. Feature Engineering — Temporal Features from Occurred
@@ -96,6 +98,26 @@ def main(
         df["hour_of_day"] = occurred.dt.hour
         df["month"] = occurred.dt.month
         df["day_of_week"] = occurred.dt.dayofweek
+
+    ############################################################################
+    # Step 3b. Days to Report (Occurred -> Reported)
+    ############################################################################
+    # Difference in days between when the sighting occurred and when it was
+    # submitted to NUFORC. Witnesses who report quickly likely had their phone
+    # out and captured media; delayed reporters likely did not.
+    # Negative values (reported before occurred) are data entry errors — clip
+    # to 0. Cap at 365 to limit influence of extreme outliers.
+    ############################################################################
+
+    if "occurred" in df.columns and "reported" in df.columns:
+        reported = pd.to_datetime(df["reported"], errors="coerce")
+        df["days_to_report"] = (reported - occurred).dt.days
+        df["days_to_report"] = df["days_to_report"].clip(lower=0, upper=365)
+        print(
+            f"\ndays_to_report — mean: {df['days_to_report'].mean():.1f}, "
+            f"median: {df['days_to_report'].median():.1f}, "
+            f"nulls: {df['days_to_report'].isna().sum()}"
+        )
 
     ############################################################################
     # Step 4. Clean Text
@@ -117,11 +139,11 @@ def main(
     # Step 6. Drop Columns
     ############################################################################
     # drop_vars in constants.py should include at minimum:
-    #   - "Occurred"    replaced by hour_of_day, month, day_of_week
-    #   - "Reported"    post-event metadata
-    #   - "Link"        URL identifier
-    #   - "Media"       raw source of target — must drop to avoid leakage
-    #   - "Explanation" post-hoc label, high missingness differential
+    #   - "occurred"    replaced by hour_of_day, month, day_of_week
+    #   - "reported"    replaced by days_to_report
+    #   - "link"        URL identifier
+    #   - "media"       raw source of target — must drop to avoid leakage
+    #   - "explanation" post-hoc label, high missingness differential
     ############################################################################
 
     df.drop(columns=drop_vars, errors="ignore", inplace=True)
@@ -190,6 +212,7 @@ def main(
         print("*" * 80)
         print(f"String columns ({len(string_cols_list)}): {string_cols_list}")
         print("*" * 80)
+
         dumpObjects(string_cols_list, os.path.join(data_path, "string_cols_list.pkl"))
         mlflow_dumpArtifact(
             experiment_name=exp_artifact_name,
