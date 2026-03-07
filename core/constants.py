@@ -21,7 +21,7 @@ event_date = "event_date"  # event date column
 
 # variables to drop from dataset
 
-drop_vars = ["occurred", "reported", "link", "media", "explanation"]
+drop_vars = ["occurred", "reported", "link", "explanation"]
 
 ################################################################################
 ############################# Mlflow Variables #################################
@@ -51,6 +51,12 @@ perc_below_indiv = f"perc_below_{miss_col_thresh}_indiv"
 miss_row_thresh = 0.5  # missingness threshold (rows) tolerated based on dev. set
 percent_miss = "percentage_missing"  # new col for percentage missing in rows
 miss_indicator = "missing_indicator"  # indicator for percentage missing (0,1)
+
+
+################################################################################
+################################### Outcome ####################################
+
+target_outcome = "media"  # target variable for modeling
 
 ## DataBricks
 databricks_username = "/" + "/".join(os.getcwd().split("/")[2:-1]) + "/"
