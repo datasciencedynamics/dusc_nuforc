@@ -14,7 +14,6 @@ from core.constants import (
     var_index,
     preproc_run_name,
     exp_artifact_name,
-    percent_miss,
     drop_vars,
 )
 
@@ -75,19 +74,59 @@ def main(
         print(f"Index '{var_index}' already set - skipping.")
 
     ############################################################################
-    # Step 2. Build Target Variable (training only)
+    # Step 2. Build Features and Target Variables (training only)
     ############################################################################
-    # Media=Y   --> 1 (witness submitted photo/video with report)
-    # Media=NaN --> 0 (no media submitted)
-    # At inference time the target column won't exist — skip silently.
+    #
+    # media: binary X feature — did the witness attach a photo/video?
+    #   media=Y   --> 1
+    #   media=NaN --> 0
+    #
+    # dramatic: binary target — did NUFORC editors flag the report as
+    #   dramatic or unusual via link punctuation?
+    #   link contains "!" or "." --> 1 (dramatic / unusual)
+    #   no punctuation flag       --> 0 (ordinary)
+    #   Derived from link before it is dropped in Step 6.
+    #
+    # explained: binary target — did NUFORC staff provide an explanation?
+    #   explanation non-null (e.g. "Starlink", "Aircraft") --> 1 (debunked)
+    #   explanation null                                    --> 0 (unexplained)
+    #   Derived from explanation before it is dropped in Step 6.
+    #
+    # Both targets are retained in the preprocessed parquet. The active
+    # outcome is controlled by target_outcome in core/constants.py.
+    # At inference time these raw columns may not exist — skip silently.
     ############################################################################
 
     if stage == "training":
-        df["media"] = (df["media"] == "Y").astype(int)
-        print("*" * 80)
-        print(f"\nTarget distribution:\n{df['media'].value_counts()}")
-        print(f"\nPositive rate: {df['media'].mean() * 100:.1f}%")
-        print("*" * 80)
+        # media --> binary feature
+        if "media" in df.columns:
+            df["media"] = (df["media"] == "Y").astype(int)
+            print("*" * 80)
+            print(f"\nMedia (feature) distribution:\n{df['media'].value_counts()}")
+            print(f"\nMedia positive rate: {df['media'].mean() * 100:.1f}%")
+            print("*" * 80)
+
+        # dramatic --> binary target (must be derived before link is dropped)
+        if "link" in df.columns:
+            df["dramatic"] = (
+                df["link"].str.contains(r"[.!]", regex=True, na=False).astype(int)
+            )
+            print("*" * 80)
+            print(f"\nTarget (dramatic) distribution:\n{df['dramatic'].value_counts()}")
+            print(f"\nDramatic positive rate: {df['dramatic'].mean() * 100:.1f}%")
+            print("*" * 80)
+
+        # explained --> binary target (must be derived before explanation is dropped)
+        if "explanation" in df.columns:
+            df["explained"] = df["explanation"].notna().astype(int)
+            # Cast raw explanation to str so parquet-safe dtype step doesn't choke
+            df["explanation"] = df["explanation"].fillna("").astype(str).str.strip()
+            print("*" * 80)
+            print(
+                f"\nTarget (explained) distribution:\n{df['explained'].value_counts()}"
+            )
+            print(f"\nExplained positive rate: {df['explained'].mean() * 100:.1f}%")
+            print("*" * 80)
 
     ############################################################################
     # Step 3. Feature Engineering — Temporal Features from Occurred
@@ -103,8 +142,7 @@ def main(
     # Step 3b. Days to Report (Occurred -> Reported)
     ############################################################################
     # Difference in days between when the sighting occurred and when it was
-    # submitted to NUFORC. Witnesses who report quickly likely had their phone
-    # out and captured media; delayed reporters likely did not.
+    # submitted to NUFORC. Witnesses who report quickly may recall more detail.
     # Negative values (reported before occurred) are data entry errors — clip
     # to 0. Cap at 365 to limit influence of extreme outliers.
     ############################################################################
@@ -135,15 +173,94 @@ def main(
     df["country"] = df["country"].fillna("Unspecified").astype(str).str.strip()
     df["state"] = df["state"].fillna("Unknown").astype(str).str.strip()
 
+    # Normalize spelled-out state names to 2-char abbreviations
+    state_abbrev = {
+        "Alabama": "AL",
+        "Alaska": "AK",
+        "Arizona": "AZ",
+        "Arkansas": "AR",
+        "California": "CA",
+        "Colorado": "CO",
+        "Connecticut": "CT",
+        "Delaware": "DE",
+        "Florida": "FL",
+        "Georgia": "GA",
+        "Hawaii": "HI",
+        "Idaho": "ID",
+        "Illinois": "IL",
+        "Indiana": "IN",
+        "Iowa": "IA",
+        "Kansas": "KS",
+        "Kentucky": "KY",
+        "Louisiana": "LA",
+        "Maine": "ME",
+        "Maryland": "MD",
+        "Massachusetts": "MA",
+        "Michigan": "MI",
+        "Minnesota": "MN",
+        "Mississippi": "MS",
+        "Missouri": "MO",
+        "Montana": "MT",
+        "Nebraska": "NE",
+        "Nevada": "NV",
+        "New Hampshire": "NH",
+        "New Jersey": "NJ",
+        "New Mexico": "NM",
+        "New York": "NY",
+        "North Carolina": "NC",
+        "North Dakota": "ND",
+        "Ohio": "OH",
+        "Oklahoma": "OK",
+        "Oregon": "OR",
+        "Pennsylvania": "PA",
+        "Rhode Island": "RI",
+        "South Carolina": "SC",
+        "South Dakota": "SD",
+        "Tennessee": "TN",
+        "Texas": "TX",
+        "Utah": "UT",
+        "Vermont": "VT",
+        "Virginia": "VA",
+        "Washington": "WA",
+        "West Virginia": "WV",
+        "Wisconsin": "WI",
+        "Wyoming": "WY",
+        "District of Columbia": "DC",
+        # Canadian provinces
+        "Ontario": "ON",
+        "Quebec": "QC",
+        "British Columbia": "BC",
+        "Alberta": "AB",
+        "Manitoba": "MB",
+        "Saskatchewan": "SK",
+        "Nova Scotia": "NS",
+        "New Brunswick": "NB",
+        "Newfoundland": "NL",
+        "Prince Edward Island": "PE",
+    }
+    df["state"] = df["state"].replace(state_abbrev)
+
+    # Flag invalid US/Canada states as Unknown; preserve international states
+    valid_us_ca = set(state_abbrev.values()) | {"Unknown"}
+
+    def normalize_state(row):
+        state = row["state"]
+        country = row["country"]
+        if country in {"USA", "Canada"}:
+            return state if state in valid_us_ca else "Unknown"
+        return state
+
+    df["state"] = df.apply(normalize_state, axis=1)
+
     ############################################################################
     # Step 6. Drop Columns
     ############################################################################
     # drop_vars in constants.py should include at minimum:
     #   - "occurred"    replaced by hour_of_day, month, day_of_week
     #   - "reported"    replaced by days_to_report
-    #   - "link"        URL identifier
-    #   - "media"       raw source of target — must drop to avoid leakage
-    #   - "explanation" post-hoc label, high missingness differential
+    #   - "link"        URL identifier — dramatic target extracted above
+    #   - "explanation" raw staff label — explained target extracted above
+    #   - "city"        high cardinality, not declared as cat_feature
     ############################################################################
 
     df.drop(columns=drop_vars, errors="ignore", inplace=True)
@@ -189,22 +306,14 @@ def main(
     df.drop(columns=zero_varlist_list, errors="ignore", inplace=True)
 
     ############################################################################
-    # Step 9. Row-wise Missingness Percentage
-    ############################################################################
-
-    df[percent_miss] = df.isna().mean(axis=1)
-    print("*" * 80)
-    print(f"\nMissingness percentage distribution:\n{df[percent_miss].describe()}\n")
-
-    ############################################################################
-    # Step 10. Parquet-safe dtypes
+    # Step 9. Parquet-safe dtypes
     ############################################################################
 
     obj_cols = df.select_dtypes(include="object").columns
     df[obj_cols] = df[obj_cols].astype(str)
 
     ############################################################################
-    # Step 11. Log String Columns to MLflow (training only, for reference)
+    # Step 10. Log String Columns to MLflow (training only, for reference)
     ############################################################################
 
     if stage == "training":
@@ -227,7 +336,7 @@ def main(
         )
 
     ############################################################################
-    # Step 12. Save
+    # Step 11. Save
     ############################################################################
 
     os.makedirs(data_path, exist_ok=True)

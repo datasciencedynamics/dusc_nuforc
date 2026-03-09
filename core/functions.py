@@ -131,7 +131,7 @@ def clean_feature_selection_params(pipeline_steps, tuned_parameters):
 def get_cat_feature_indices(preprocessor, num_cols, cat_cols):
     """
     Return categorical feature indices AFTER ColumnTransformer.
-    Assumes transformer order: num → cat
+    Assumes transformer order: num --> cat
     """
 
     if len(cat_cols) == 0:
@@ -1559,7 +1559,7 @@ def plot_cumulative_fatalities_captured(
             # Annotation with actual counts
             actual_count = cum_fatalities.iloc[idx]
             ax.annotate(
-                f"{int(pct*100)}% events\n→ {capture_rate*100:.0f}% casualties\n({int(actual_count):,} of {int(total_fatalities):,})",
+                f"{int(pct*100)}% events\n--> {capture_rate*100:.0f}% casualties\n({int(actual_count):,} of {int(total_fatalities):,})",
                 xy=(pct, capture_rate),
                 xytext=(pct + 0.08, capture_rate - 0.12),
                 fontsize=9,
@@ -1631,7 +1631,9 @@ def print_capture_summary(
         frac_events = capture_table.iloc[idx]["event_fraction"]
         frac_fatal = capture_table.iloc[idx]["cumulative_fraction"]
 
-        print(f"Top {int(k*100):>2}% events " f"→ {frac_fatal*100:6.2f}% of fatalities")
+        print(
+            f"Top {int(k*100):>2}% events " f"--> {frac_fatal*100:6.2f}% of fatalities"
+        )
 
     print("\nFirst 5 rows of capture table:")
     print(capture_table.head().round(4))

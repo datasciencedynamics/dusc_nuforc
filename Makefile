@@ -10,19 +10,21 @@ CONDA_ENV_NAME = nuforc_conda
 MAKEFILE_DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 PROJECT_DIRECTORY := $(abspath $(MAKEFILE_DIR))
 
+
 ############################## Training Globals ################################
 
-# Define variables for looping
-OUTCOMES = media
-PIPELINES = orig orig_rfe
+OUTCOME := dramatic
+PIPELINES := orig smote under orig_rfe smote_rfe under_rfe
+PIPELINES = orig smote under orig_rfe smote_rfe under_rfe
 SCORING = average_precision
+PROMPT_TYPES := zero_shot few_shot
 PRETRAINED ?= 0  # 0 if you want to train the models, 1 if calibrate pretrained
 
 ############################# Production Globals ###############################
 
 # Model outcome variable used in production 
-EXPLAN_OUTCOME = media # explainer outcome variable
-PROD_OUTCOME = media # production outcome variable
+EXPLAN_OUTCOME = dramatic # explainer outcome variable
+PROD_OUTCOME = dramatic # production outcome variable
 
 # ------------------------------------------------------------------------------
 # COMMANDS
@@ -81,7 +83,7 @@ check_vars:
 	@echo " - PYTHON_VERSION"
 	@echo " - VENV_DIR"
 	@echo " - CONDA_ENV_NAME"
-	@echo " - OUTCOMES"
+	@echo " - OUTCOME"
 	@echo " - PIPELINES"
 	@echo " - SCORING"
 	@echo " - EXPLAN_OUTCOME"
@@ -145,10 +147,9 @@ clean_dir:
 
 
 # Folder Creation 
-
 .PHONY: create_folders
 create_folders:
-# Create data subdirectories
+	# Create data subdirectories
 	mkdir -p data/external data/interim data/processed data/raw data/processed/inference
 	mkdir -p modeling
 	mkdir -p core
@@ -160,12 +161,11 @@ create_folders:
 	touch preprocessing/__init__.py
 	touch core/__init__.py
 
-# Create models subdirectories for each outcome
-	@for outcome in $(OUTCOMES); do \
+	# Create models subdirectories for each outcome
+	@for outcome in $(OUTCOME); do \
 		mkdir -p models/results/$$outcome; \
 		mkdir -p models/eval/$$outcome; \
 	done
-
 ################################################################################
 ################################### Training ###################################
 ####################### Preprocessing (+) Dataprep Pipeline ####################
@@ -187,26 +187,11 @@ data_prep_preprocessing_training:
 		--data-path ./data/processed \
 		2>&1 | tee ./data/processed/data_prep_preprocessing_training.txt
 
-.PHONY: build_text_base
-build_text_base:
-	$(PYTHON_INTERPRETER) $(PROJECT_DIRECTORY)/preprocessing/build_text_base.py \
-		--input-data-file ./data/raw/nuforc_data.parquet \
-		--output-data-file ./data/processed/text_base.parquet \
-		2>&1 | tee ./data/processed/build_text_base.txt
 
-.PHONY: build_text_embeddings
-build_text_embeddings:
-	$(PYTHON_INTERPRETER) $(PROJECT_DIRECTORY)/preprocessing/build_text_embeddings.py \
-		--input-data-file ./data/processed/text_base.parquet \
-		--output-data-file ./data/processed/text_embeddings.parquet \
-		2>&1 | tee ./data/processed/build_text_embeddings.txt
-
-.PHONY: remove_notes_leakage
-remove_notes_leakage:
-	$(PYTHON_INTERPRETER) $(PROJECT_DIRECTORY)/preprocessing/remove_notes_leakage.py \
-		--input-file ./data/processed/text_base.parquet \
-		--output-file ./data/processed/text_base_no_leakage.parquet \
-		2>&1 | tee ./data/processed/remove_notes_leakage.txt
+.PHONY: clean_cache
+clean_cache:
+	rm -f ./data/processed/llm_cache.json
+	@echo "LLM cache cleared."
 
 .PHONY: feat_gen_training
 feat_gen_training:
@@ -222,145 +207,96 @@ preproc_pipeline: data_gen temporal_splits data_prep_preprocessing_training  \
 
 ################################################################################
 ################################# Training #####################################
-########################## RFE, Imb Learn Models ###############################
+################################# LLM Model ####################################
 ################################################################################
 
-### Train Linear Regression 
+define train_llm_model
+	rm -f ./models/train/llm/llm_cache_$(1)_$(2).json
+	$(PYTHON_INTERPRETER) $(PROJECT_DIRECTORY)/modeling/train_llm.py \
+		--features-path ./data/processed/X.parquet \
+		--labels-path ./data/processed/y_dramatic.parquet \
+		--splits-dir ./models/train/splits \
+		--max-workers 10 \
+		--model $(2) \
+		--prompt-type $(1) \
+		--few-shot-n 5 \
+		--cache-path ./models/train/llm/llm_cache_$(1)_$(2).json \
+		--output-path ./models/train/llm/llm_dramatic_preds_$(1)_$(2).parquet \
+	2>&1 | tee models/results/$(OUTCOME)/llm_$(1)_$(2)_train.txt
+endef
+
+train_llm_zero_shot_llama:
+	$(call train_llm_model,zero_shot,llama-3.1-8b-instant)
+
+train_llm_few_shot_llama:
+	$(call train_llm_model,few_shot,llama-3.1-8b-instant)
+
+train_llm_zero_shot_llama70b:
+	$(call train_llm_model,zero_shot,llama-3.3-70b-versatile)
+
+train_llm_few_shot_llama70b:
+	$(call train_llm_model,few_shot,llama-3.3-70b-versatile)
+
+
+define train_text_model
+	$(PYTHON_INTERPRETER) $(PROJECT_DIRECTORY)/modeling/train.py \
+		--model-type $(1) \
+		--pipeline-type $(2) \
+		--text-col summary \
+		--outcome $(OUTCOME) \
+		--scoring average_precision \
+		--pretrained 0 \
+	2>&1 | tee models/results/$(OUTCOME)/$(1)_$(2)_train.txt
+endef
+
+# Text models — pipeline_type is ignored internally but passed for MLflow run naming
+train_cat_text:
+	$(call train_text_model,cat_text,orig)
+
+train_cat_text_only:
+	$(call train_text_model,cat_text_only,orig)
+
+# Tabular models — loop over all pipeline types
 train_lr:
-	@echo "Pretrained is set to: $(PRETRAINED)"
-	@for o in $(OUTCOMES); do \
-		mkdir -p models/results/$$o; \
-		for p in $(PIPELINES); do \
-			"$(PYTHON_INTERPRETER)" $(PROJECT_DIRECTORY)/modeling/train.py \
-				--model-type lr \
-				--pipeline-type $$p \
-				--outcome $$o \
-				--data-path ./data/processed \
-				--pretrained $(PRETRAINED) \
-				--scoring $(SCORING) \
-				2>&1 | tee models/results/$$o/lr_$$p.txt; \
-		done; \
-	done
+	$(foreach p,$(PIPELINES),$(call train_text_model,lr,$(p)) &&) true
 
-### Train Lasso Regression
-train_lasso:
-	@echo "Pretrained is set to: $(PRETRAINED)"
-	@for o in $(OUTCOMES); do \
-		mkdir -p models/results/$$o; \
-		for p in $(PIPELINES); do \
-			"$(PYTHON_INTERPRETER)" $(PROJECT_DIRECTORY)/modeling/train.py \
-				--model-type lasso \
-				--pipeline-type $$p \
-				--outcome $$o \
-				--data-path ./data/processed \
-				--pretrained $(PRETRAINED) \
-				--scoring $(SCORING) \
-				2>&1 | tee models/results/$$o/lasso_$$p.txt; \
-		done; \
-	done
-
-### Train XGBoost Regression
-train_xgb:
-	@echo "Pretrained is set to: $(PRETRAINED)"
-	@for o in $(OUTCOMES); do \
-		mkdir -p models/results/$$o; \
-		for p in $(PIPELINES); do \
-			"$(PYTHON_INTERPRETER)" $(PROJECT_DIRECTORY)/modeling/train.py \
-				--model-type xgb \
-				--pipeline-type $$p \
-				--outcome $$o \
-				--data-path ./data/processed \
-				--pretrained $(PRETRAINED) \
-				--scoring $(SCORING) \
-				2>&1 | tee models/results/$$o/xgb_$$p.txt; \
-		done; \
-	done
-
-### Train CatBoost Regression
 train_cat:
-	@echo "Pretrained is set to: $(PRETRAINED)"
-	@for o in $(OUTCOMES); do \
-		mkdir -p models/results/$$o; \
-		for p in $(PIPELINES); do \
-			"$(PYTHON_INTERPRETER)" $(PROJECT_DIRECTORY)/modeling/train.py \
-				--model-type cat \
-				--pipeline-type $$p \
-				--outcome $$o \
-				--data-path ./data/processed \
-				--pretrained $(PRETRAINED) \
-				--scoring $(SCORING) \
-				2>&1 | tee models/results/$$o/cat_$$p.txt; \
-		done; \
-	done
+	$(foreach p,$(PIPELINES),$(call train_text_model,cat,$(p)) &&) true
 
-# train_all_models: train_lr train_lasso train_xgb train_cat
-train_all_models: train_lr train_lasso
+train_all_tabular: train_lr train_cat
+train_all_ml: train_cat_text train_cat_text_only train_all_tabular
+train_all_llm: train_llm_zero_shot_llama \
+               train_llm_few_shot_llama \
+               train_llm_zero_shot_llama70b \
+               train_llm_few_shot_llama70b
+
 ################################################################################
 ############################### Model Evaluation ###############################
 ################################################################################
 
-### Evaluate Linear Regression
-eval_lr:
-	@for o in $(OUTCOMES); do \
-		mkdir -p models/eval/$$o; \
-		for p in $(PIPELINES); do \
-			"$(PYTHON_INTERPRETER)" $(PROJECT_DIRECTORY)/modeling/evaluation.py \
-				--model-type lr \
-				--pipeline-type $$p \
-				--outcome $$o \
-				--outcome-name $$o \
-				--data-path ./data/processed \
-				2>&1 | tee models/eval/$$o/eval_lr_$$p.txt; \
-		done; \
-	done
+define eval_model
+	mkdir -p models/eval/$(3)/$(1)/$(2)
+	$(PYTHON_INTERPRETER) $(PROJECT_DIRECTORY)/modeling/evaluate.py \
+		--model-type $(1) \
+		--pipeline-type $(2) \
+		--outcome $(3) \
+		--output-dir ./models/eval \
+	2>&1 | tee models/eval/$(3)/$(1)/$(2)/eval.txt
+endef
 
-### Evaluate Lasso Regression
-eval_lasso:
-	@for o in $(OUTCOMES); do \
-		mkdir -p models/eval/$$o; \
-		for p in $(PIPELINES); do \
-			"$(PYTHON_INTERPRETER)" $(PROJECT_DIRECTORY)/modeling/evaluation.py \
-				--model-type lasso \
-				--pipeline-type $$p \
-				--outcome $$o \
-				--outcome-name $$o \
-				--data-path ./data/processed \
-				2>&1 | tee models/eval/$$o/eval_lasso_$$p.txt; \
-		done; \
-	done
+eval_lr:      ; $(foreach p,$(PIPELINES),$(call eval_model,lr,$(p),$(OUTCOME)) &&) true
+eval_cat:     ; $(foreach p,$(PIPELINES),$(call eval_model,cat,$(p),$(OUTCOME)) &&) true
+eval_cat_text:       ; $(call eval_model,cat_text,orig,$(OUTCOME))
+eval_cat_text_only:  ; $(call eval_model,cat_text_only,orig,$(OUTCOME))
+eval_llm:
+	$(PYTHON_INTERPRETER) $(PROJECT_DIRECTORY)/modeling/evaluate.py \
+		--model-type llm \
+		--outcome $(OUTCOME) \
+		--llm-preds-path ./models/train/llm/llm_dramatic_preds_zero_shot.parquet \
+		--llm-prompt-type zero_shot \
+		--output-dir ./models/eval
 
-### Evaluate XGBoost Regression
-eval_xgb:
-	@for o in $(OUTCOMES); do \
-		mkdir -p models/eval/$$o; \
-		for p in $(PIPELINES); do \
-			"$(PYTHON_INTERPRETER)" $(PROJECT_DIRECTORY)/modeling/evaluation.py \
-				--model-type xgb \
-				--pipeline-type $$p \
-				--outcome $$o \
-				--outcome-name $$o \
-				--data-path ./data/processed \
-				2>&1 | tee models/eval/$$o/eval_xgb_$$p.txt; \
-		done; \
-	done
-
-### Evaluate CatBoost Regression
-eval_cat:
-	@for o in $(OUTCOMES); do \
-		mkdir -p models/eval/$$o; \
-		for p in $(PIPELINES); do \
-			"$(PYTHON_INTERPRETER)" $(PROJECT_DIRECTORY)/modeling/evaluation.py \
-				--model-type cat \
-				--pipeline-type $$p \
-				--outcome $$o \
-				--outcome-name $$o \
-				--data-path ./data/processed \
-				2>&1 | tee models/eval/$$o/eval_cat_$$p.txt; \
-		done; \
-	done
-	
-eval_all_models: eval_lr eval_lasso eval_xgb eval_cat
-
+eval_all_models: eval_lr eval_cat eval_cat_text eval_cat_text_only eval_llm
 
 ################################ Modeling Pipeline #############################
 ### Shortcut to run full modeling pipeline: training, evaluation

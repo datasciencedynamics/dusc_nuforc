@@ -175,4 +175,4 @@ images/
 images/.DS_Store
 notebooks/*.png
 notebooks/*.tiff
-**/images/
+**/images/.env
