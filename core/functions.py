@@ -25,13 +25,15 @@ from sklearn.metrics import (
     ConfusionMatrixDisplay,
     mean_squared_error,
     mean_absolute_error,
+    roc_curve,
+    roc_auc_score,
+    precision_recall_curve,
+    auc,
     r2_score,
-    precision_score,
-    recall_score,
     brier_score_loss,
-    precision_score,
-    average_precision_score,
 )
+
+from sklearn.calibration import calibration_curve
 
 from tqdm import tqdm
 
@@ -2075,6 +2077,1040 @@ def haversine_km(lat, lon, ref_lat, ref_lon):
         + np.cos(np.radians(ref_lat)) * np.cos(np.radians(lat)) * np.sin(dlon / 2) ** 2
     )
     return R * 2 * np.arcsin(np.sqrt(a))
+
+
+################################################################################
+########################  Metrics to Store in MLFlow ###########################
+
+
+class PlotMetrics:
+    def __init__(self, images_path=None):
+        """
+        Initialize the PlotMetrics class.
+
+        Parameters:
+        -----------
+        images_path : str, optional
+            Path to save the generated plots.
+        """
+        self.images_path = images_path
+
+    def _save_plot(self, title, extension="png"):
+        """
+        Save the plot to the specified path if images_path is provided.
+
+        Parameters:
+        -----------
+        title : str
+            Title of the plot.
+        extension : str, optional (default="png")
+            File extension for the saved plot.
+        """
+        if self.images_path:
+            filename = f"{title.replace(' ', '_').replace(':', '')}.{extension}"
+            plt.savefig(os.path.join(self.images_path, filename), format=extension)
+
+    def plot_roc(
+        self,
+        df=None,
+        outcome_cols=None,
+        pred_cols=None,
+        models=None,
+        X_valid=None,
+        y_valid=None,
+        pred_probs_df=None,
+        model_name=None,
+        custom_name=None,
+        show=True,
+    ):
+        """
+        Plot ROC curves from model predictions or predicted probabilities.
+
+        Parameters
+        ----------
+        df : pd.DataFrame, optional
+            DataFrame containing actual and predicted probability columns.
+        outcome_cols : list of str, optional
+            Column names for actual binary outcomes in `df`.
+        pred_cols : list of str, optional
+            Column names for predicted probabilities in `df`.
+        models : dict, optional
+            Dictionary of trained models with `.predict_proba()` methods.
+        X_valid : pd.DataFrame, optional
+            Validation features for generating model predictions.
+        y_valid : array-like, optional
+            True binary labels corresponding to `X_valid`.
+        pred_probs_df : pd.DataFrame, optional
+            DataFrame of predicted probabilities (one column per model or method).
+        model_name : str, optional
+            Key to select a specific model from `models`.
+        custom_name : str, optional
+            Custom title prefix to display on the plot.
+        show : bool, default=True
+            Whether to display the plot immediately.
+
+        Returns
+        -------
+        fig : matplotlib.figure.Figure
+            The resulting matplotlib figure object.
+        """
+
+        fig, _ = plt.subplots(figsize=(8, 8))
+        title = None
+
+        if outcome_cols and pred_cols and df is not None:
+            for outcome_col, pred_col in zip(outcome_cols, pred_cols):
+                y_prob = df[pred_col]
+                fpr, tpr, _ = roc_curve(df[outcome_col], y_prob)
+                auc_score = roc_auc_score(df[outcome_col], y_prob)
+                plt.plot(fpr, tpr, label=f"{outcome_col} (AUC={auc_score:.2f})")
+
+        if models and X_valid is not None and y_valid is not None:
+            if model_name:
+                y_score = models[model_name].predict_proba(X_valid)[:, 1]
+                fpr, tpr, _ = roc_curve(y_valid, y_score)
+                auc_score = roc_auc_score(y_valid, y_score)
+                plt.plot(fpr, tpr, label=f"{model_name} (AUC={auc_score:.2f})")
+            else:
+                for name, model in models.items():
+                    y_score = model.predict_proba(X_valid)[:, 1]
+                    fpr, tpr, _ = roc_curve(y_valid, y_score)
+                    auc_score = roc_auc_score(y_valid, y_score)
+                    plt.plot(fpr, tpr, label=f"{name} (AUC={auc_score:.2f})")
+
+        if pred_probs_df is not None:
+            for col in pred_probs_df.columns:
+                y_score = pred_probs_df[col].values
+                fpr, tpr, _ = roc_curve(y_valid, y_score)
+                auc_score = roc_auc_score(y_valid, y_score)
+                plt.plot(fpr, tpr, label=f"{col} (AUC={auc_score:.2f})")
+
+        plt.plot([0, 1], [0, 1], color="navy", linestyle="--")
+        plt.xlim([0.0, 1.0])
+        plt.ylim([0.0, 1.05])
+        plt.xlabel("False Positive Rate")
+        plt.ylabel("True Positive Rate")
+        plt.legend(loc="lower right")
+
+        title = (
+            f"{custom_name} - Receiver Operating Characteristic"
+            if custom_name
+            else "Receiver Operating Characteristic"
+        )
+
+        plt.title(title)
+        self._save_plot(title)
+        if show:
+            plt.show()
+
+        return fig
+
+    def plot_precision_recall(
+        self,
+        df=None,
+        outcome_cols=None,
+        pred_cols=None,
+        models=None,
+        X_valid=None,
+        y_valid=None,
+        pred_probs_df=None,
+        model_name=None,
+        custom_name=None,
+        show=True,
+    ):
+        """
+        Plot precision-recall curves from model predictions or predicted
+        probabilities.
+
+        Parameters
+        ----------
+        df : pd.DataFrame, optional
+            DataFrame containing actual and predicted probability columns.
+        outcome_cols : list of str, optional
+            Column names for actual binary outcomes in `df`.
+        pred_cols : list of str, optional
+            Column names for predicted probabilities in `df`.
+        models : dict, optional
+            Dictionary of trained models with `.predict_proba()` methods.
+        X_valid : pd.DataFrame, optional
+            Validation features for generating model predictions.
+        y_valid : array-like, optional
+            True binary labels corresponding to `X_valid`.
+        pred_probs_df : pd.DataFrame, optional
+            DataFrame of predicted probabilities (one column per model).
+        model_name : str, optional
+            Key to select a specific model from `models`.
+        custom_name : str, optional
+            Custom title prefix to display on the plot.
+        show : bool, default=True
+            Whether to display the plot immediately.
+
+        Returns
+        -------
+        fig : matplotlib.figure.Figure
+            The resulting matplotlib figure object.
+        """
+
+        fig, _ = plt.subplots(figsize=(8, 8))
+        title = None
+
+        if outcome_cols and pred_cols and df is not None:
+            for outcome_col, pred_col in zip(outcome_cols, pred_cols):
+                y_prob = df[pred_col]
+                precision, recall, _ = precision_recall_curve(df[outcome_col], y_prob)
+                auc_pr = auc(recall, precision)
+                plt.plot(
+                    recall, precision, label=f"{outcome_col} (AUC-PR={auc_pr:.2f})"
+                )
+
+        if models and X_valid is not None and y_valid is not None:
+            if model_name:
+                y_score = models[model_name].predict_proba(X_valid)[:, 1]
+                precision, recall, _ = precision_recall_curve(y_valid, y_score)
+                auc_pr = auc(recall, precision)
+                plt.plot(recall, precision, label=f"{model_name} (AUC-PR={auc_pr:.2f})")
+            else:
+                for name, model in models.items():
+                    y_score = model.predict_proba(X_valid)[:, 1]
+                    precision, recall, _ = precision_recall_curve(y_valid, y_score)
+                    auc_pr = auc(recall, precision)
+                    plt.plot(recall, precision, label=f"{name} (AUC-PR={auc_pr:.2f})")
+
+        if pred_probs_df is not None:
+            for col in pred_probs_df.columns:
+                y_score = pred_probs_df[col].values
+                precision, recall, _ = precision_recall_curve(y_valid, y_score)
+                auc_pr = auc(recall, precision)
+                plt.plot(recall, precision, label=f"{col} (AUC-PR={auc_pr:.2f})")
+
+        plt.xlabel("Recall")
+        plt.ylabel("Precision")
+        plt.legend(loc="lower left")
+
+        title = (
+            f"{custom_name} - Precision-Recall Curve"
+            if custom_name
+            else "Precision-Recall Curve"
+        )
+
+        plt.title(title)
+        self._save_plot(title)
+        if show:
+            plt.show()
+
+        return fig
+
+    def plot_confusion_matrix(
+        self,
+        df=None,
+        outcome_cols=None,
+        pred_cols=None,
+        models=None,
+        X_valid=None,
+        y_valid=None,
+        threshold=0.5,
+        custom_name=None,
+        model_name=None,
+        normalize=None,
+        cmap="Blues",
+        show=True,
+        use_optimal_threshold=False,
+    ):
+        """
+        Plot a confusion matrix from predicted probabilities or model outputs.
+
+        Parameters
+        ----------
+        df : pd.DataFrame, optional
+            DataFrame containing actual and predicted probability columns.
+        outcome_cols : list of str, optional
+            Column names for actual binary outcomes in `df`.
+        pred_cols : list of str, optional
+            Column names for predicted probabilities in `df`.
+        models : dict, optional
+            Dictionary of trained models with `.predict_proba()` or `.predict()`
+            methods.
+        X_valid : pd.DataFrame, optional
+            Validation features to use for model predictions.
+        y_valid : array-like, optional
+            True labels corresponding to `X_valid`.
+        threshold : float, default=0.5
+            Threshold to binarize predicted probabilities when `optimal_threshold`
+            is False.
+        custom_name : str, optional
+            Custom name to use in the plot title.
+        model_name : str, optional
+            Key to select a specific model from `models`.
+        normalize : {'true', 'pred', 'all'}, optional
+            Normalization method for the confusion matrix.
+        cmap : str, default='Blues'
+            Matplotlib colormap for the heatmap.
+        show : bool, default=True
+            Whether to display the plot immediately.
+        use_optimal_threshold : bool, default=False
+            If True, uses model's `predict(..., optimal_threshold=True)` method
+            instead of manual thresholding.
+
+        Returns
+        -------
+        fig : matplotlib.figure.Figure
+            The resulting matplotlib figure object.
+        """
+
+        fig, ax = plt.subplots(figsize=(8, 8))
+        title = None
+
+        if outcome_cols and pred_cols and df is not None:
+            for outcome_col, pred_col in zip(outcome_cols, pred_cols):
+                y_true = df[outcome_col]
+                if use_optimal_threshold and hasattr(model, "predict"):
+                    y_pred = model.predict(X_valid, optimal_threshold=True)
+                else:
+                    y_pred = (df[pred_col] > threshold).astype(int)
+                cm = confusion_matrix(y_true, y_pred, normalize=normalize)
+                cm = model.conf_mat
+                # model.conf_mat_class_kfold(model, X_valid, y_valid, use_optimal_threshold)
+                disp = ConfusionMatrixDisplay(
+                    confusion_matrix=cm,
+                    display_labels=[0, 1],
+                )
+                disp.plot(ax=ax, cmap=cmap, colorbar=False)
+
+                # Add TP, FP, TN, FN labels
+                labels = [["TN", "FP"], ["FN", "TP"]]
+                # Normalize for brightness scaling
+                norm_cm = cm.astype(float) / cm.max()
+
+                for i in range(2):
+                    for j in range(2):
+                        # Get colormap color
+                        color = plt.get_cmap(cmap)(norm_cm[i, j])
+                        brightness = (
+                            color[0] * 0.299 + color[1] * 0.587 + color[2] * 0.114
+                        )  # Grayscale brightness
+                        text_color = (
+                            "white" if brightness < 0.5 else "black"
+                        )  # Adaptive text color
+
+                        ax.text(
+                            j,
+                            i - 0.15,
+                            labels[i][j],  # Position slightly above the number
+                            ha="center",
+                            va="center",
+                            fontsize=12,
+                            color=text_color,
+                        )
+
+        if models and X_valid is not None and y_valid is not None:
+            if model_name:
+                model = models[model_name]
+                print(model.conf_mat)
+                return
+                if use_optimal_threshold:
+                    y_pred = model.predict(X_valid, optimal_threshold=True)
+                else:
+                    y_pred = (model.predict_proba(X_valid)[:, 1] > threshold).astype(
+                        int
+                    )
+                cm = confusion_matrix(y_valid, y_pred, normalize=normalize)
+                cm = model.conf_mat
+                disp = ConfusionMatrixDisplay(
+                    confusion_matrix=cm, display_labels=[0, 1]
+                )
+                disp.plot(ax=ax, cmap=cmap, colorbar=False)
+
+                # Add TP, FP, TN, FN labels
+                labels = [["TN", "FP"], ["FN", "TP"]]
+                norm_cm = cm.astype(float) / cm.max()
+
+                for i in range(2):
+                    for j in range(2):
+                        color = plt.get_cmap(cmap)(norm_cm[i, j])
+                        brightness = (
+                            color[0] * 0.299 + color[1] * 0.587 + color[2] * 0.114
+                        )
+                        text_color = "white" if brightness < 0.5 else "black"
+
+                        ax.text(
+                            j,
+                            i - 0.15,
+                            labels[i][j],
+                            ha="center",
+                            va="center",
+                            fontsize=12,
+                            color=text_color,
+                        )
+            else:
+                for _, model in models.items():
+                    y_pred = (model.predict_proba(X_valid)[:, 1] > threshold).astype(
+                        int
+                    )
+                    cm = confusion_matrix(
+                        y_valid,
+                        y_pred,
+                        normalize=normalize,
+                    )
+                    disp = ConfusionMatrixDisplay(
+                        confusion_matrix=cm,
+                        display_labels=[0, 1],
+                    )
+                    disp.plot(ax=ax, cmap=cmap, colorbar=False)
+
+                    # Add TP, FP, TN, FN labels
+                    labels = [["TN", "FP"], ["FN", "TP"]]
+                    norm_cm = cm.astype(float) / cm.max()
+
+                    for i in range(2):
+                        for j in range(2):
+                            color = plt.get_cmap(cmap)(norm_cm[i, j])
+                            brightness = (
+                                color[0] * 0.299 + color[1] * 0.587 + color[2] * 0.114
+                            )
+                            text_color = "white" if brightness < 0.5 else "black"
+
+                            ax.text(
+                                j,
+                                i - 0.15,
+                                labels[i][j],
+                                ha="center",
+                                va="center",
+                                fontsize=12,
+                                color=text_color,
+                            )
+
+        title = (
+            f"{custom_name} - Confusion Matrix" if custom_name else "Confusion Matrix"
+        )
+
+        title += f" Threshold = {threshold}"
+
+        plt.title(title)
+        self._save_plot(title)
+        if show:
+            plt.show()
+
+        return fig
+
+    def plot_calibration_curve(
+        self,
+        df=None,
+        outcome_cols=None,
+        pred_cols=None,
+        models=None,
+        X_valid=None,
+        y_valid=None,
+        pred_probs_df=None,
+        model_name=None,
+        custom_name=None,
+        n_bins=10,
+        show=True,
+    ):
+        """
+        Plot calibration curves to assess the agreement between predicted
+        probabilities and actual outcomes.
+
+        Parameters
+        ----------
+        df : pd.DataFrame, optional
+            DataFrame containing actual and predicted probability columns.
+        outcome_cols : list of str, optional
+            Column names for actual binary outcomes in `df`.
+        pred_cols : list of str, optional
+            Column names for predicted probabilities in `df`.
+        models : dict, optional
+            Dictionary of trained models with `.predict_proba()` methods.
+        X_valid : pd.DataFrame, optional
+            Validation features for generating model predictions.
+        y_valid : array-like, optional
+            True binary labels corresponding to `X_valid`.
+        pred_probs_df : pd.DataFrame, optional
+            DataFrame of predicted probabilities (one column per model or method).
+        model_name : str, optional
+            Key to select a specific model from `models`.
+        custom_name : str, optional
+            Custom title to display on the plot.
+        n_bins : int, default=10
+            Number of bins to use when grouping predicted probabilities for
+            calibration.
+        show : bool, default=True
+            Whether to display the plot immediately.
+
+        Returns
+        -------
+        fig : matplotlib.figure.Figure
+            The resulting matplotlib figure object.
+        """
+
+        fig, _ = plt.subplots(figsize=(8, 8))
+
+        # Handle predictions and true labels
+        if df is not None and outcome_cols and pred_cols:
+            for outcome_col, pred_col in zip(outcome_cols, pred_cols):
+                y_true = df[outcome_col]
+                y_prob = df[pred_col]
+                frac_pos, mean_pred = calibration_curve(
+                    y_true,
+                    y_prob,
+                    n_bins=n_bins,
+                )
+                brier = brier_score_loss(y_true, y_prob)
+                plt.plot(
+                    mean_pred,
+                    frac_pos,
+                    marker="o",
+                    label=f"{pred_col} (Brier={brier:.3f})",
+                )
+
+        elif models and X_valid is not None and y_valid is not None:
+            if model_name:
+                y_prob = models[model_name].predict_proba(X_valid)[:, 1]
+                frac_pos, mean_pred = calibration_curve(
+                    y_valid,
+                    y_prob,
+                    n_bins=n_bins,
+                )
+                brier = brier_score_loss(y_valid, y_prob)
+                plt.plot(
+                    mean_pred,
+                    frac_pos,
+                    marker="o",
+                    label=f"{model_name} (Brier={brier:.3f})",
+                )
+            else:
+                for name, model in models.items():
+                    y_prob = model.predict_proba(X_valid)[:, 1]
+                    frac_pos, mean_pred = calibration_curve(
+                        y_valid,
+                        y_prob,
+                        n_bins=n_bins,
+                    )
+                    brier = brier_score_loss(y_valid, y_prob)
+                    plt.plot(
+                        mean_pred,
+                        frac_pos,
+                        marker="o",
+                        label=f"{name} (Brier={brier:.3f})",
+                    )
+
+        elif pred_probs_df is not None and y_valid is not None:
+            for col in pred_probs_df.columns:
+                y_prob = pred_probs_df[col].values
+                frac_pos, mean_pred = calibration_curve(
+                    y_valid,
+                    y_prob,
+                    n_bins=n_bins,
+                )
+                brier = brier_score_loss(y_valid, y_prob)
+                plt.plot(
+                    mean_pred,
+                    frac_pos,
+                    marker="o",
+                    label=f"{col} (Brier={brier:.3f})",
+                )
+
+        # Perfect calibration line
+        plt.plot([0, 1], [0, 1], "k--", label="Perfectly Calibrated")
+        plt.xlabel("Mean Predicted Probability")
+        plt.ylabel("Fraction of Positives")
+        plt.legend(loc="lower right")
+
+        # Set title with custom_name or default to "Calibration Curve"
+        title = custom_name if custom_name else "Calibration Curve"
+        plt.title(title)
+        self._save_plot(title)
+        if show:
+            plt.show()
+
+        return fig
+
+    def plot_metrics_vs_thresholds(
+        self,
+        models=None,
+        X_valid=None,
+        y_valid=None,
+        df=None,
+        outcome_cols=None,
+        pred_cols=None,
+        pred_probs_df=None,
+        model_name=None,
+        custom_name=None,
+        scoring=None,
+        show=True,
+    ):
+        """
+        Plot Precision, Recall, F1 Score, and Specificity against thresholds,
+        automatically marking the optimal threshold from the model.
+
+        Parameters:
+        -----------
+        models : dict, optional
+            Dictionary of model names and their fitted instances.
+        X_valid : array-like, optional
+            Validation features for the models.
+        y_valid : array-like or pandas.Series, optional
+            True labels for validation data.
+        df : pandas.DataFrame, optional
+            DataFrame containing true outcomes and predicted probabilities.
+        outcome_cols : list, optional
+            Column names in df for true outcomes.
+        pred_cols : list, optional
+            Column names in df for predicted probabilities.
+        pred_probs_df : pandas.DataFrame, optional
+            DataFrame with precomputed predicted probabilities.
+        model_name : str, optional
+            Specific model name to plot.
+        custom_name : str, optional
+            Custom name for the plot title.
+        show : bool, optional (default=True)
+            Whether to display the plot.
+
+        Returns:
+        --------
+        fig : matplotlib.figure.Figure
+            The generated figure object.
+        """
+
+        fig, ax = plt.subplots(figsize=(10, 6))
+        title = custom_name or "Precision, Recall, F1, Specificity vs. Thresholds"
+
+        def plot_curves(
+            y_true,
+            y_pred_probs,
+            threshold,
+            label_prefix="",
+        ):
+            precision, recall, thresholds = precision_recall_curve(
+                y_true,
+                y_pred_probs,
+            )
+            # Avoid div by zero
+            f1_scores = 2 * (precision * recall) / (precision + recall + 1e-9)
+            fpr, _, roc_thresholds = roc_curve(y_true, y_pred_probs)
+            specificity = 1 - fpr
+
+            ax.plot(
+                thresholds,
+                f1_scores[:-1],
+                label=f"{label_prefix}F1 Score",
+                color="red",
+            )
+            ax.plot(
+                thresholds,
+                recall[:-1],
+                label=f"{label_prefix}Recall",
+                color="green",
+            )
+            ax.plot(
+                thresholds,
+                precision[:-1],
+                label=f"{label_prefix}Precision",
+                color="blue",
+            )
+            ax.plot(
+                roc_thresholds,
+                specificity,
+                label=f"{label_prefix}Specificity",
+                color="purple",
+            )
+
+            # Add vertical line for the model's threshold
+            ax.axvline(
+                x=float(threshold),  # Ensure it's a float
+                color="black",
+                linestyle="--",
+                linewidth=2,
+                label=f"{label_prefix}Threshold ({float(threshold):.2f})",
+            )
+
+        # Case 1: Direct model predictions
+        if models and X_valid is not None and y_valid is not None:
+            y_valid = y_valid.squeeze()
+            if model_name:
+                model = models[model_name]
+                # Get the threshold dictionary
+                threshold_dict = getattr(model, "threshold", {})
+                # Extract using `scoring`
+                threshold = float(threshold_dict.get(scoring, 0.5))
+                plot_curves(
+                    y_valid,
+                    model.predict_proba(X_valid)[:, 1],
+                    threshold,
+                    label_prefix=f"{model_name} ",
+                )
+            else:
+                for name, model in models.items():
+                    threshold_dict = getattr(model, "threshold", {})
+                    # Extract using `scoring`
+                    threshold = float(threshold_dict.get(scoring, 0.5))
+                    plot_curves(
+                        y_valid,
+                        model.predict_proba(X_valid)[:, 1],
+                        threshold,
+                        label_prefix=f"{name} ",
+                    )
+
+        # Case 2: Provided dataframe with outcome/prediction columns
+        # (defaults to 0.5)
+        elif df is not None and outcome_cols and pred_cols:
+            for outcome_col, pred_col in zip(outcome_cols, pred_cols):
+                plot_curves(
+                    df[outcome_col],
+                    df[pred_col],
+                    threshold=0.5,
+                    label_prefix=f"{pred_col} ",
+                )
+
+        # Case 3: Precomputed prediction probabilities DataFrame with y_valid
+        # (defaults to 0.5)
+        elif pred_probs_df is not None and y_valid is not None:
+            y_valid = y_valid.squeeze()
+            for col in pred_probs_df.columns:
+                plot_curves(
+                    y_valid,
+                    pred_probs_df[col].values,
+                    threshold=0.5,
+                    label_prefix=f"{col} ",
+                )
+
+        ax.set_title(title)
+        ax.set_xlabel("Thresholds")
+        ax.set_ylabel("Metrics")
+        ax.legend(loc="best")
+        ax.grid()
+
+        if show:
+            plt.show()
+
+        return fig
+
+
+################################################################################
+####################### MLFlow Models and Artifacts ############################
+################################################################################
+
+
+######################### MlFLow Helper Functions ##############################
+def set_or_create_experiment(experiment_name, verbose=True):
+    """
+    Set up or create an MLflow experiment.
+
+    Args:
+        experiment_name: Name of the experiment.
+
+    Returns:
+        Experiment ID.
+    """
+
+    existing_experiment = mlflow.get_experiment_by_name(experiment_name)
+    if existing_experiment is None:
+        print(f"Experiment '{experiment_name}' does not exist. Creating a new one.")
+        experiment_id = mlflow.create_experiment(experiment_name)
+    else:
+        experiment_id = existing_experiment.experiment_id
+        if verbose:
+            print(f"Using Existing Experiment_ID: {experiment_id}")
+    mlflow.set_experiment(experiment_name)
+    return experiment_id
+
+
+def start_new_run(run_name):
+    """
+    Start a new MLflow run with the given name.
+
+    Args:
+        run_name: Name of the run.
+
+    Returns:
+        Run ID of the newly started run.
+    """
+    run = mlflow.start_run(run_name=run_name)
+    run_id = run.info.run_id
+    mlflow.end_run()
+    print(f"Starting New Run_ID: {run_id} for {run_name}")
+    return run_id
+
+
+def get_run_id_by_name(experiment_name, run_name, verbose=True):
+    """
+    Query MLflow to find the run_id for the given run_name in the experiment.
+    If no run exists, create a new one.
+
+    Args:
+        experiment_name: Name of the MLflow experiment.
+        run_name: Name of the run to search for or create.
+
+    Returns:
+        Run ID of the most recent run matching the run_name, or a new run ID
+        if none exists.
+    """
+    client = MlflowClient()
+
+    # Get the experiment
+    experiment = mlflow.get_experiment_by_name(experiment_name)
+    if not experiment:
+        raise ValueError(f"Experiment {experiment_name} not found.")
+
+    # Search for existing runs
+    runs = client.search_runs(
+        experiment_ids=[experiment.experiment_id],
+        filter_string=f"tags.mlflow.runName = '{run_name}'",
+        order_by=["start_time DESC"],  # Get the most recent run
+    )
+
+    if runs:
+        run_id = runs[0].info.run_id  # Use the latest run_id for this run_name
+        if verbose:
+            print(
+                f"Found Run_ID: {run_id} for run_name '{run_name}' in experiment '{experiment_name}'"
+            )
+    else:
+        # No runs found, create a new one
+        if verbose:
+            print(
+                f"No runs found with run_name '{run_name}' in experiment '{experiment_name}'. Creating a new run."
+            )
+        run_id = start_new_run(run_name)
+
+    return run_id
+
+
+################## Dump artificats (e.g. to preprocessing) #####################
+
+
+def mlflow_dumpArtifact(
+    experiment_name,
+    run_name,
+    obj_name,
+    obj,
+    get_existing_id=True,
+    artifact_run_id=None,
+    artifacts_data_path=mlflow_artifacts_data,
+):
+    """
+    Log an object as an MLflow artifact with a persistent run ID.
+
+    Args:
+        experiment_name: Name of the MLflow experiment.
+        run_name: Name of the run within the experiment.
+        obj_name: Name of the artifact (without .pkl extension).
+        obj: Object to serialize and log.
+        get_existing_id: If True, try to reuse an existing run ID (default: True).
+        artifact_run_id: Specific run ID to use (optional).
+        artifacts_data_path: Path to MLflow artifacts directory
+        (default: mlflow_artifacts_data from constants).
+
+    Returns:
+        None
+    """
+
+    # Initialize or reuse the artifacts_run_id as a function attribute
+    if not hasattr(mlflow_dumpArtifact, "artifacts_run_id"):
+        mlflow_dumpArtifact.artifacts_run_id = None
+    else:
+        mlflow_dumpArtifact.artifacts_run_id = artifact_run_id
+    abs_mlflow_data = os.path.abspath(artifacts_data_path)
+    mlflow.set_tracking_uri(f"file://{abs_mlflow_data}")
+
+    # Set or create experiment
+    experiment_id = set_or_create_experiment(experiment_name)
+    print(f"Experiment_ID for artifact {obj_name}: {experiment_id}")
+
+    if get_existing_id:
+        mlflow_dumpArtifact.artifacts_run_id = get_run_id_by_name(
+            experiment_name,
+            run_name,
+        )
+
+    # Get or create a single run_id for all artifacts
+    if mlflow_dumpArtifact.artifacts_run_id:
+        run_id = mlflow_dumpArtifact.artifacts_run_id
+        print(f"Reusing Existing Artifacts Run_ID: {run_id} for {run_name}")
+    else:
+        run_id = start_new_run(run_name)
+        # Store the run_id for future calls
+        mlflow_dumpArtifact.artifacts_run_id = run_id
+
+    with mlflow.start_run(run_id=run_id, nested=True):
+        temp_file = f"{obj_name}.pkl"
+        with open(temp_file, "wb") as f:
+            pickle.dump(obj, f)
+        mlflow.log_artifact(temp_file)
+        os.remove(temp_file)
+
+    print(f"Artifact {obj_name} logged successfully in MLflow under Run_ID: {run_id}.")
+    return None
+
+
+################# Load artificats (e.g. from preprocessing) ####################
+
+
+def mlflow_loadArtifact(
+    experiment_name,
+    run_name,  # Use run_name to query the single artifacts run_id
+    obj_name,
+    verbose=True,
+    artifacts_data_path=mlflow_artifacts_data,
+):
+    """
+    Load an object from MLflow artifacts by experiment and run name.
+
+    Args:
+        experiment_name: Name of the MLflow experiment.
+        run_name: Name of the run within the experiment.
+        obj_name: Name of the artifact (without .pkl extension).
+
+    Returns:
+        Deserialized object from the artifact.
+
+    Raises:
+        ValueError: If experiment or run is not found.
+    """
+    abs_mlflow_data = os.path.abspath(artifacts_data_path)
+    mlflow.set_tracking_uri(f"file://{abs_mlflow_data}")
+
+    set_or_create_experiment(experiment_name, verbose=verbose)
+
+    # Get the run_id using the helper function
+    run_id = get_run_id_by_name(experiment_name, run_name, verbose=verbose)
+
+    # Download the artifact from the run's artifact directory
+    client = MlflowClient()
+
+    local_path = client.download_artifacts(run_id, f"{obj_name}.pkl")
+    with open(local_path, "rb") as f:
+        obj = pickle.load(f)
+    return obj
+
+
+################### Return model metrics to be used in MlFlow ##################
+
+
+def return_model_metrics(
+    inputs: dict,
+    model,
+    estimator_name,
+    return_dict: bool = False,
+) -> pd.Series:
+    """
+    Compute and return model performance metrics for multiple input types.
+
+    Parameters:
+    ----------
+    inputs : dict
+        A dictionary where keys are dataset names (e.g., "train", "test") and
+        values are tuples containing feature matrices (X) and target arrays (y).
+    model : object
+        A model instance with a `return_metrics` method that computes evaluation
+        metrics.
+    estimator_name : str
+        The name of the estimator to label the output.
+
+    Returns:
+    -------
+    pd.Series
+        A Series containing the computed metrics, indexed by input type and
+        metric name.
+    """
+
+    all_metrics = []
+    for input_type, (X, y) in inputs.items():
+        print(input_type)
+        return_metrics_dict = model.return_metrics(
+            X,
+            y,
+            optimal_threshold=True,
+            print_threshold=True,
+            model_metrics=True,
+            return_dict=return_dict,
+        )
+
+        metrics = pd.Series(return_metrics_dict).to_frame(estimator_name)
+        metrics = round(metrics, 3)
+        metrics.index = [input_type + " " + ind for ind in metrics.index]
+        all_metrics.append(metrics)
+    return pd.concat(all_metrics)
+
+
+####################### Enter the model plots into MlFlow ######################
+
+
+def return_model_plots(
+    inputs,
+    model,
+    estimator_name,
+    scoring,
+):
+    """
+    Generate evaluation plots for a given model on multiple input datasets.
+
+    Parameters:
+    ----------
+    inputs : dict
+        A dictionary where keys are dataset names (e.g., "train", "test") and
+        values are tuples containing feature matrices (X) and target arrays (y).
+    model : object
+        A trained model with a `threshold` attribute used for evaluation.
+    estimator_name : str
+        The name of the estimator to label the plots.
+
+    Returns:
+    -------
+    dict
+        A dictionary mapping plot filenames to generated plots, including:
+        - ROC curves (`roc_{input_type}.png`)
+        - Confusion matrices (`cm_{input_type}.png`)
+        - Precision-recall curves (`pr_{input_type}.png`)
+    """
+
+    all_plots = {}
+    plotter = PlotMetrics()
+    for input_type, (X, y) in inputs.items():
+        all_plots[f"roc_{input_type}.png"] = plotter.plot_roc(
+            models={estimator_name: model},
+            X_valid=X,
+            y_valid=y,
+            custom_name=estimator_name,
+            show=False,
+        )
+        all_plots[f"cm_{input_type}.png"] = plotter.plot_confusion_matrix(
+            models={estimator_name: model},
+            X_valid=X,
+            y_valid=y,
+            threshold=next(iter(model.threshold.values())),
+            custom_name=estimator_name,
+            show=False,
+            use_optimal_threshold=True,
+        )
+
+        all_plots[f"pr_{input_type}.png"] = plotter.plot_precision_recall(
+            models={estimator_name: model},
+            X_valid=X,
+            y_valid=y,
+            custom_name=estimator_name,
+            show=False,
+        )
+
+        all_plots[f"calib_{input_type}.png"] = plotter.plot_calibration_curve(
+            models={estimator_name: model},
+            X_valid=X,
+            y_valid=y,
+            custom_name=f"{estimator_name} - Calibration Curve",
+            show=False,
+        )
+
+        all_plots[f"metrics_thresh_{input_type}.png"] = (
+            plotter.plot_metrics_vs_thresholds(
+                models={estimator_name: model},
+                X_valid=X,
+                y_valid=y,
+                custom_name=f"{estimator_name} - Precision, Recall, F1 Score, Specificity vs. Thresholds",
+                scoring=scoring,
+                show=False,
+            )
+        )
+
+    return all_plots
 
 
 ################################ End of functions.py ###########################

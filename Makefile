@@ -264,11 +264,13 @@ train_cat:
 	$(foreach p,$(PIPELINES),$(call train_text_model,cat,$(p)) &&) true
 
 train_all_tabular: train_lr train_cat
-train_all_ml: train_cat_text train_cat_text_only train_all_tabular
+train_all_ml: train_cat_text train_cat_text_only 
 train_all_llm: train_llm_zero_shot_llama \
                train_llm_few_shot_llama \
                train_llm_zero_shot_llama70b \
                train_llm_few_shot_llama70b
+
+train_all_models: train_all_tabular train_all_ml train_all_llm
 
 ################################################################################
 ############################### Model Evaluation ###############################
@@ -296,11 +298,12 @@ eval_llm:
 		--llm-prompt-type zero_shot \
 		--output-dir ./models/eval
 
-eval_all_models: eval_lr eval_cat eval_cat_text eval_cat_text_only eval_llm
+eval_all_models: eval_lr eval_cat eval_cat_text eval_cat_text_only
 
 ################################ Modeling Pipeline #############################
 ### Shortcut to run full modeling pipeline: training, evaluation
 ################################################################################
+
 modeling_train_eval_pipeline: train_all_models eval_all_models
 
 ################################################################################
