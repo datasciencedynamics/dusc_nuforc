@@ -77,7 +77,7 @@ rfe = RFE(
 ################################################################################
 
 categorical_cols = ["shape", "country", "state"]
-text_features = ["summary"]
+text_features = ["summary_clean"]
 
 # Load feature column names from MLflow
 try:

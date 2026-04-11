@@ -21,7 +21,16 @@ event_date = "event_date"  # event date column
 
 # variables to drop from dataset
 
-drop_vars = ["occurred", "reported", "link", "explanation", "media", "city"]
+drop_vars = [
+    "occurred",
+    "reported",
+    "link",
+    "explanation",
+    "media",
+    "city",
+    "shape_group",
+    "summary",
+]
 
 ################################################################################
 ############################# Mlflow Variables #################################

@@ -173,20 +173,34 @@ create_folders:
 
 .PHONY: data_gen
 data_gen:
-	$(PYTHON_INTERPRETER) preprocessing/data_gen.py \
-		--input-data-file "./data/raw/NUFORC_DATA.xlsx" \
+	$(PYTHON_INTERPRETER) preprocessing/1_data_gen.py \
+		--input-data-file "./data/raw/NUFORC_DATA_04_10_2026.xlsx" \
 		--output-data-file "./data/raw/nuforc_data.parquet" \
-		2>&1 | tee ./data/raw/data_gen.txt
+		2>&1 | tee ./data/raw/1_data_gen.txt
+
+.PHONY: nlp_feature_engineer_nuforc
+nlp_feature_engineer_nuforc:
+	$(PYTHON_INTERPRETER) $(PROJECT_DIRECTORY)/preprocessing/2_nlp_feature_engineer_nuforc.py \
+		--input-parquet "./data/raw/nuforc_data.parquet" \
+		--output-parquet "./data/processed/nuforc_engineered.parquet" \
+		--output-metadata "./data/processed/nuforc_feature_metadata.json" \
+		2>&1 | tee ./data/processed/2_nlp_feature_engineer_nuforc.txt
+
+.PHONY: nuforc_analytics
+nuforc_analytics:
+	$(PYTHON_INTERPRETER) $(PROJECT_DIRECTORY)/preprocessing/3_nuforc_analytics.py \
+		--input-parquet "./data/processed/nuforc_engineered.parquet" \
+		--output-parquet "./data/processed/NUFORC_enriched.parquet" \
+		2>&1 | tee ./data/processed/3_nuforc_analytics.txt
 
 .PHONY: data_prep_preprocessing_training
 data_prep_preprocessing_training:
-	$(PYTHON_INTERPRETER) $(PROJECT_DIRECTORY)/preprocessing/preprocessing.py \
-		--input-data-file ./data/raw/nuforc_data.parquet \
+	$(PYTHON_INTERPRETER) $(PROJECT_DIRECTORY)/preprocessing/4_preprocessing_remaining_feats.py \
+		--input-data-file ./data/processed/NUFORC_enriched.parquet \
 		--output-data-file ./data/processed/df_sans_zero_missing.parquet \
 		--stage training \
 		--data-path ./data/processed \
-		2>&1 | tee ./data/processed/data_prep_preprocessing_training.txt
-
+		2>&1 | tee ./data/processed/4_preprocessing_remaining_feats.txt
 
 .PHONY: clean_cache
 clean_cache:
@@ -195,11 +209,11 @@ clean_cache:
 
 .PHONY: feat_gen_training
 feat_gen_training:
-	$(PYTHON_INTERPRETER) $(PROJECT_DIRECTORY)/preprocessing/feat_gen.py \
+	$(PYTHON_INTERPRETER) $(PROJECT_DIRECTORY)/preprocessing/5_feat_gen.py \
 		--input-data-file ./data/processed/df_sans_zero_missing.parquet \
 		--stage training \
 		--data-path ./data/processed \
-		2>&1 | tee ./data/processed/feat_gen_training.txt
+		2>&1 | tee ./data/processed/5_feat_gen_training.txt
 
 
 preproc_pipeline: data_gen temporal_splits data_prep_preprocessing_training  \
@@ -393,6 +407,7 @@ model_explanations_inference:
 			--explanations-path ./data/processed/inference/shap_predictions_$$outcome.csv \
 			2>&1 | tee ./data/processed/inference/model_explanations_$$outcome.txt; \
 	done
+
 preproc_pipeline_inference: data_prep_preprocessing_inference \
     feat_gen_inference \
     predict \
