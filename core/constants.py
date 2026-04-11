@@ -28,6 +28,7 @@ drop_vars = [
     "explanation",
     "media",
     "city",
+    "state",
     "shape_group",
     "summary",
 ]

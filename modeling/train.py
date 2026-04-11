@@ -49,7 +49,7 @@ def main(
     outcome: str = "dramatic",
     features_path: Path = PROCESSED_DATA_DIR / "X.parquet",
     labels_path: Optional[Path] = None,  # derived from outcome if not passed
-    text_col: str = "summary",
+    text_col: str = "summary_clean",
     scoring: str = "average_precision",
     pretrained: int = 0,
 ):

@@ -202,11 +202,6 @@ data_prep_preprocessing_training:
 		--data-path ./data/processed \
 		2>&1 | tee ./data/processed/4_preprocessing_remaining_feats.txt
 
-.PHONY: clean_cache
-clean_cache:
-	rm -f ./data/processed/llm_cache.json
-	@echo "LLM cache cleared."
-
 .PHONY: feat_gen_training
 feat_gen_training:
 	$(PYTHON_INTERPRETER) $(PROJECT_DIRECTORY)/preprocessing/5_feat_gen.py \
@@ -215,8 +210,15 @@ feat_gen_training:
 		--data-path ./data/processed \
 		2>&1 | tee ./data/processed/5_feat_gen_training.txt
 
+.PHONY: clean_cache
+clean_cache:
+	rm -f ./data/processed/llm_cache.json
+	@echo "LLM cache cleared."
 
-preproc_pipeline: data_gen temporal_splits data_prep_preprocessing_training  \
+preproc_pipeline: data_gen \
+                  nlp_feature_engineer_nuforc \
+				  nuforc_analytics \
+				  data_prep_preprocessing_training  \
 				  feat_gen_training
 
 ################################################################################
@@ -264,8 +266,8 @@ define train_text_model
 endef
 
 # Text models — pipeline_type is ignored internally but passed for MLflow run naming
-train_cat_text:
-	$(call train_text_model,cat_text,orig)
+train_cat_feats_and_text:
+	$(call train_text_model,cat_feats_and_text,orig)
 
 train_cat_text_only:
 	$(call train_text_model,cat_text_only,orig)
@@ -278,13 +280,13 @@ train_cat:
 	$(foreach p,$(PIPELINES),$(call train_text_model,cat,$(p)) &&) true
 
 train_all_tabular: train_lr train_cat
-train_all_ml: train_cat_text train_cat_text_only 
+train_all_ml: train_cat_feats_and_text train_cat_text_only
 train_all_llm: train_llm_zero_shot_llama \
                train_llm_few_shot_llama \
                train_llm_zero_shot_llama70b \
                train_llm_few_shot_llama70b
 
-train_all_models: train_all_tabular train_all_ml train_all_llm
+train_all_models: train_all_tabular train_all_ml 
 
 ################################################################################
 ############################### Model Evaluation ###############################
@@ -302,7 +304,7 @@ endef
 
 eval_lr:      ; $(foreach p,$(PIPELINES),$(call eval_model,lr,$(p),$(OUTCOME)) &&) true
 eval_cat:     ; $(foreach p,$(PIPELINES),$(call eval_model,cat,$(p),$(OUTCOME)) &&) true
-eval_cat_text:       ; $(call eval_model,cat_text,orig,$(OUTCOME))
+eval_cat_feats_and_text:       ; $(call eval_model,cat_feats_and_text,orig,$(OUTCOME))
 eval_cat_text_only:  ; $(call eval_model,cat_text_only,orig,$(OUTCOME))
 eval_llm:
 	$(PYTHON_INTERPRETER) $(PROJECT_DIRECTORY)/modeling/evaluate.py \
@@ -312,7 +314,7 @@ eval_llm:
 		--llm-prompt-type zero_shot \
 		--output-dir ./models/eval
 
-eval_all_models: eval_lr eval_cat eval_cat_text eval_cat_text_only
+eval_all_models: eval_lr eval_cat eval_cat_feats_and_text eval_cat_text_only
 
 ################################ Modeling Pipeline #############################
 ### Shortcut to run full modeling pipeline: training, evaluation
