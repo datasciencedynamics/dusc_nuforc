@@ -39,7 +39,7 @@ print("#" * 80 + "\n")
 
 @app.command()
 def main(
-    input_data_file: str = "./data/processed/nuforc_preprocessed.parquet",
+    input_data_file: str = "./data/processed/df_sans_zero_missing.parquet",
     stage: str = "training",
     data_path: str = "./data/processed",
 ):

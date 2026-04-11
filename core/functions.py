@@ -10,7 +10,6 @@ import mlflow
 from mlflow.tracking import MlflowClient
 import pickle
 import os
-import networkx as nx
 import shap
 from sklearn.preprocessing import OneHotEncoder
 from sklearn.pipeline import FunctionTransformer, Pipeline
@@ -1217,78 +1216,6 @@ def normalize_actor(actor: str) -> str:
 
     # fallback
     return actor
-
-
-################################################################################
-# Actor Interactions Embeddings
-################################################################################
-
-
-def parse_assoc_actors(x):
-    if not isinstance(x, str) or x.strip() == "":
-        return []
-    return [a.strip() for a in x.split(";")]
-
-
-def build_actor_interaction_graph(
-    df,
-    actor1_col="actor1_root",
-    actor2_col="actor2_root",
-    assoc1_col="assoc_actor_1",
-    assoc2_col="assoc_actor_2",
-    none_actor_label="None_Actor",
-    main_weight=1.0,
-    assoc_weight=0.5,
-    none_actor_weight=0.3,
-):
-    """
-    Build a weighted, undirected actor interaction graph.
-    Primary actors define main edges; associated actors contribute
-    lower-weight contextual edges used for representation learning.
-    """
-
-    G = nx.Graph()
-
-    for _, row in tqdm(
-        df.iterrows(), total=len(df), desc="Building actor interaction graph"
-    ):
-        a1 = row[actor1_col]
-        a2 = row[actor2_col]
-
-        # main interaction
-        if a1 != a2:
-            w = main_weight
-            if a2 == none_actor_label:
-                w = none_actor_weight
-
-            if G.has_edge(a1, a2):
-                G[a1][a2]["weight"] += w
-            else:
-                G.add_edge(a1, a2, weight=w)
-
-        # assoc actors for actor1
-        for assoc in parse_assoc_actors(row.get(assoc1_col)):
-            assoc_root = normalize_actor(assoc)
-            if assoc_root != a1:
-                G.add_edge(
-                    a1,
-                    assoc_root,
-                    weight=G.get_edge_data(a1, assoc_root, {}).get("weight", 0)
-                    + assoc_weight,
-                )
-
-        # assoc actors for actor2
-        for assoc in parse_assoc_actors(row.get(assoc2_col)):
-            assoc_root = normalize_actor(assoc)
-            if assoc_root != a2:
-                G.add_edge(
-                    a2,
-                    assoc_root,
-                    weight=G.get_edge_data(a2, assoc_root, {}).get("weight", 0)
-                    + assoc_weight,
-                )
-
-    return G
 
 
 ################################################################################

@@ -32,8 +32,8 @@ print("#" * 80 + "\n")
 
 @app.command()
 def main(
-    input_data_file: str = "./data/raw/nuforc_data.parquet",
-    output_data_file: str = "./data/processed/nuforc_preprocessed.parquet",
+    input_data_file: str = "./data/processed/NUFORC_enriched.parquet",
+    output_data_file: str = "./data/processed/df_sans_zero_missing.parquet",
     stage: str = "training",
     data_path: str = "./data/processed",
 ):
@@ -99,11 +99,10 @@ def main(
 
     if stage == "training":
         # media --> binary feature
-        if "media" in df.columns:
-            df["media"] = (df["media"] == "Y").astype(int)
+        if "has_media" in df.columns:
             print("*" * 80)
-            print(f"\nMedia (feature) distribution:\n{df['media'].value_counts()}")
-            print(f"\nMedia positive rate: {df['media'].mean() * 100:.1f}%")
+            print(f"\nMedia (feature) distribution:\n{df['has_media'].value_counts()}")
+            print(f"\nMedia positive rate: {df['has_media'].mean() * 100:.1f}%")
             print("*" * 80)
 
         # dramatic --> binary target (must be derived before link is dropped)
@@ -116,165 +115,50 @@ def main(
             print(f"\nDramatic positive rate: {df['dramatic'].mean() * 100:.1f}%")
             print("*" * 80)
 
-        # explained --> binary target (must be derived before explanation is dropped)
-        if "explanation" in df.columns:
-            df["explained"] = df["explanation"].notna().astype(int)
-            # Cast raw explanation to str so parquet-safe dtype step doesn't choke
-            df["explanation"] = df["explanation"].fillna("").astype(str).str.strip()
-            print("*" * 80)
-            print(
-                f"\nTarget (explained) distribution:\n{df['explained'].value_counts()}"
-            )
-            print(f"\nExplained positive rate: {df['explained'].mean() * 100:.1f}%")
-            print("*" * 80)
-
     ############################################################################
-    # Step 3. Feature Engineering — Temporal Features from Occurred
+    # Step 3. Clean Text
+    ############################################################################
+    # Fill nulls with empty string. CatBoost text_features requires no NaNs.
     ############################################################################
 
-    if "occurred" in df.columns:
-        occurred = pd.to_datetime(df["occurred"], errors="coerce")
-        df["hour_of_day"] = occurred.dt.hour
-        df["month"] = occurred.dt.month
-        df["day_of_week"] = occurred.dt.dayofweek
+    df["summary_clean"] = df["summary_clean"].fillna("").astype(str).str.strip()
 
     ############################################################################
-    # Step 3b. Days to Report (Occurred -> Reported)
-    ############################################################################
-    # Difference in days between when the sighting occurred and when it was
-    # submitted to NUFORC. Witnesses who report quickly may recall more detail.
-    # Negative values (reported before occurred) are data entry errors — clip
-    # to 0. Cap at 365 to limit influence of extreme outliers.
-    ############################################################################
-
-    if "occurred" in df.columns and "reported" in df.columns:
-        reported = pd.to_datetime(df["reported"], errors="coerce")
-        df["days_to_report"] = (reported - occurred).dt.days
-        df["days_to_report"] = df["days_to_report"].clip(lower=0, upper=365)
-        print(
-            f"\ndays_to_report — mean: {df['days_to_report'].mean():.1f}, "
-            f"median: {df['days_to_report'].median():.1f}, "
-            f"nulls: {df['days_to_report'].isna().sum()}"
-        )
-
-    ############################################################################
-    # Step 4. Clean Text
-    ############################################################################
-    # Fill nulls with empty string — CatBoost text_features requires no NaNs.
-    ############################################################################
-
-    df["summary"] = df["summary"].fillna("").astype(str).str.strip()
-
-    ############################################################################
-    # Step 5. Clean Categorical Features
+    # Step 4. Clean Categorical Features
     ############################################################################
 
     df["shape"] = df["shape"].fillna("Unknown").astype(str).str.strip()
     df["country"] = df["country"].fillna("Unspecified").astype(str).str.strip()
     df["state"] = df["state"].fillna("Unknown").astype(str).str.strip()
 
-    # Normalize spelled-out state names to 2-char abbreviations
-    state_abbrev = {
-        "Alabama": "AL",
-        "Alaska": "AK",
-        "Arizona": "AZ",
-        "Arkansas": "AR",
-        "California": "CA",
-        "Colorado": "CO",
-        "Connecticut": "CT",
-        "Delaware": "DE",
-        "Florida": "FL",
-        "Georgia": "GA",
-        "Hawaii": "HI",
-        "Idaho": "ID",
-        "Illinois": "IL",
-        "Indiana": "IN",
-        "Iowa": "IA",
-        "Kansas": "KS",
-        "Kentucky": "KY",
-        "Louisiana": "LA",
-        "Maine": "ME",
-        "Maryland": "MD",
-        "Massachusetts": "MA",
-        "Michigan": "MI",
-        "Minnesota": "MN",
-        "Mississippi": "MS",
-        "Missouri": "MO",
-        "Montana": "MT",
-        "Nebraska": "NE",
-        "Nevada": "NV",
-        "New Hampshire": "NH",
-        "New Jersey": "NJ",
-        "New Mexico": "NM",
-        "New York": "NY",
-        "North Carolina": "NC",
-        "North Dakota": "ND",
-        "Ohio": "OH",
-        "Oklahoma": "OK",
-        "Oregon": "OR",
-        "Pennsylvania": "PA",
-        "Rhode Island": "RI",
-        "South Carolina": "SC",
-        "South Dakota": "SD",
-        "Tennessee": "TN",
-        "Texas": "TX",
-        "Utah": "UT",
-        "Vermont": "VT",
-        "Virginia": "VA",
-        "Washington": "WA",
-        "West Virginia": "WV",
-        "Wisconsin": "WI",
-        "Wyoming": "WY",
-        "District of Columbia": "DC",
-        # Canadian provinces
-        "Ontario": "ON",
-        "Quebec": "QC",
-        "British Columbia": "BC",
-        "Alberta": "AB",
-        "Manitoba": "MB",
-        "Saskatchewan": "SK",
-        "Nova Scotia": "NS",
-        "New Brunswick": "NB",
-        "Newfoundland": "NL",
-        "Prince Edward Island": "PE",
-    }
-    df["state"] = df["state"].replace(state_abbrev)
-
-    # Flag invalid US/Canada states as Unknown; preserve international states
-    valid_us_ca = set(state_abbrev.values()) | {"Unknown"}
-
-    def normalize_state(row):
-        state = row["state"]
-        country = row["country"]
-        if country in {"USA", "Canada"}:
-            return state if state in valid_us_ca else "Unknown"
-        return state
-
-    df["state"] = df.apply(normalize_state, axis=1)
-
     ############################################################################
-    # Step 6. Drop Columns
+    # Step 5. Drop Columns
     ############################################################################
     # drop_vars in constants.py should include at minimum:
     #   - "occurred"    replaced by hour_of_day, month, day_of_week
     #   - "reported"    replaced by days_to_report
     #   - "link"        URL identifier — dramatic target extracted above
     #   - "explanation" raw staff label — explained target extracted above
+    #   - "media"       binary media presence feature extracted already
     #   - "city"        high cardinality, not declared as cat_feature
+    #   - "shape_group" redundant with shape, and not declared as cat_feature
+    #   - "summary"     cleaned raw text (summary_clean) retained for CatBoost
+    #                   text_features, but not
     ############################################################################
 
     df.drop(columns=drop_vars, errors="ignore", inplace=True)
     print(f"\nDataFrame first 5 rows:\n{df.head()}")
+    print(f"\nDropped columns: {drop_vars}")
     print(f"\nShape after dropping columns: {df.shape}\n")
 
     ############################################################################
-    # Step 7. Safe Numeric Conversion
+    # Step 6. Safe Numeric Conversion
     ############################################################################
 
     df = df.apply(lambda x: safe_to_numeric(x))
 
     ############################################################################
-    # Step 8. Zero Variance Columns (fit on training, apply on inference)
+    # Step 7. Zero Variance Columns (fit on training, apply on inference)
     ############################################################################
 
     if stage == "training":
@@ -306,14 +190,14 @@ def main(
     df.drop(columns=zero_varlist_list, errors="ignore", inplace=True)
 
     ############################################################################
-    # Step 9. Parquet-safe dtypes
+    # Step 8. Parquet-safe dtypes
     ############################################################################
 
     obj_cols = df.select_dtypes(include="object").columns
     df[obj_cols] = df[obj_cols].astype(str)
 
     ############################################################################
-    # Step 10. Log String Columns to MLflow (training only, for reference)
+    # Step 9. Log String Columns to MLflow (training only, for reference)
     ############################################################################
 
     if stage == "training":
@@ -336,7 +220,7 @@ def main(
         )
 
     ############################################################################
-    # Step 11. Save
+    # Step 10. Save
     ############################################################################
 
     os.makedirs(data_path, exist_ok=True)

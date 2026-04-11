@@ -94,10 +94,10 @@ def main(
     # Step 4. Save to parquet
     ############################################################################
 
-    df["Summary"] = df["Summary"].astype(str)
-    df["State"] = df["State"].astype(str) 
+    df["Summary"]  = df["Summary"].astype(str)
+    df["State"]    = df["State"].astype(str)
+    df["Occurred"] = pd.to_datetime(df["Occurred"], errors="coerce")
     df["Reported"] = pd.to_datetime(df["Reported"], errors="coerce")
-
     print(f"\n{df.head()}")
 
     df.to_parquet(output_data_file)
