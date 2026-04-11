@@ -95,7 +95,7 @@ def main(
     ############################################################################
 
     df["Summary"] = df["Summary"].astype(str)
-
+    df["State"] = df["State"].astype(str) 
     df["Reported"] = pd.to_datetime(df["Reported"], errors="coerce")
 
     print(f"\n{df.head()}")
