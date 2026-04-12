@@ -29,6 +29,8 @@ drop_vars = [
     "media",
     "city",
     "state",
+    "latitude",
+    "longitude",
     "shape_group",
     "summary",
 ]

@@ -258,7 +258,7 @@ define train_text_model
 	$(PYTHON_INTERPRETER) $(PROJECT_DIRECTORY)/modeling/train.py \
 		--model-type $(1) \
 		--pipeline-type $(2) \
-		--text-col summary \
+		--text-col summary_clean \
 		--outcome $(OUTCOME) \
 		--scoring average_precision \
 		--pretrained 0 \
@@ -315,6 +315,18 @@ eval_llm:
 		--output-dir ./models/eval
 
 eval_all_models: eval_lr eval_cat eval_cat_feats_and_text eval_cat_text_only
+
+
+.PHONY: bootstrap_eval
+bootstrap_eval:
+	$(PYTHON_INTERPRETER) $(PROJECT_DIRECTORY)/modeling/bootstrap_evaluation.py \
+		--outcome dramatic \
+		--n-samples -1 \
+		--num-resamples 5000 \
+		--output-dir ./models/eval \
+		--output-csv bootstrap_metrics.csv \
+		2>&1 | tee ./models/eval/bootstrap_eval.txt
+		# --n-samples -1 means use full test set size (len(X_test))
 
 ################################ Modeling Pipeline #############################
 ### Shortcut to run full modeling pipeline: training, evaluation
