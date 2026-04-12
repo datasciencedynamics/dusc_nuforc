@@ -57,7 +57,7 @@ def main(
     if labels_path is None:
         labels_path = PROCESSED_DATA_DIR / f"y_{outcome}.parquet"
 
-    is_text_model = model_type in {"cat_text", "cat_text_only"}
+    is_text_model = model_type in {"cat_feats_and_text", "cat_text_only"}
     is_text_only = model_type == "cat_text_only"
 
     ################################################################################
@@ -78,7 +78,7 @@ def main(
         X[text_col] = X[text_col].fillna("").astype(str)
     else:
         # Tabular only: drop raw text column
-        X = X.drop(columns=["summary"], errors="ignore")
+        X = X.drop(columns=["summary_clean"], errors="ignore")
 
     ################################################################################
     # Step 4. Retrieve Model and Pipeline Configurations
@@ -146,7 +146,7 @@ def main(
     ################################################################################
     # Step 6b. Build fit_params for CatBoost text
     # Indices are resolved dynamically after drop_vars have been removed from X.
-    # text_features: [summary index]
+    # text_features: [summary_clean index]
     # cat_features:  [state, country, shape indices] — string cols that are NOT
     #                text features; must be declared or CatBoost tries float parsing
     ################################################################################
@@ -232,24 +232,6 @@ def main(
         f"Total Train_Val_Test size: "
         f"{X_train.shape[0] + X_valid.shape[0] + X_test.shape[0]}"
     )
-
-    ################################################################################
-    # Step 9b. Save test indices (once, from lr/orig as canonical split)
-    ################################################################################
-
-    if model_type == "lr" and pipeline_type == "orig":
-        splits_dir = Path("./models/train/splits")
-        splits_dir.mkdir(parents=True, exist_ok=True)
-        for split_name, split_X in [
-            ("train", X_train),
-            ("valid", X_valid),
-            ("test", X_test),
-        ]:
-            path = splits_dir / f"{split_name}_indices.parquet"
-            pd.DataFrame({"index": split_X.index}).to_parquet(path, index=False)
-            print(
-                f"{split_name.capitalize()} indices saved to: {path} ({len(split_X):,} rows)"
-            )
 
     ################################################################################
     # Step 10. Train the Model

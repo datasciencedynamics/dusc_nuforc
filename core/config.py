@@ -283,7 +283,7 @@ cat_definition = {
 #################### CatBoost Text + Tabular Classifier #######################
 ################################################################################
 
-cat_text_name = "cat_text"
+cat_text_name = "cat_feats_and_text"
 cat_text = CatBoostClassifier(
     task_type="CPU",
     random_state=rstate,
@@ -333,28 +333,27 @@ _text_processing_options = [
 
 cat_text_parameters = [
     {
-        "cat_text__text_processing": _text_processing_options,
-        "cat_text__depth": [4, 6, 8],
-        "cat_text__learning_rate": [0.02, 0.03, 0.05],
-        "cat_text__l2_leaf_reg": [3, 10, 30],
-        "cat_text__n_estimators": [3000, 6000, 10000],
-        "cat_text__early_stopping_rounds": [75, 150],
-        "cat_text__subsample": [0.7, 0.8, 1.0],
-        "cat_text__min_data_in_leaf": [5, 10],
-        "cat_text__leaf_estimation_method": ["Newton"],
-        "cat_text__verbose": [0],
+        "cat_feats_and_text__text_processing": _text_processing_options,
+        "cat_feats_and_text__depth": [4, 6, 8],
+        "cat_feats_and_text__learning_rate": [0.02, 0.03, 0.05],
+        "cat_feats_and_text__l2_leaf_reg": [3, 10, 30],
+        "cat_feats_and_text__n_estimators": [3000, 6000, 10000],
+        "cat_feats_and_text__early_stopping_rounds": [75, 150],
+        "cat_feats_and_text__subsample": [0.7, 0.8, 1.0],
+        "cat_feats_and_text__min_data_in_leaf": [5, 10],
+        "cat_feats_and_text__leaf_estimation_method": ["Newton"],
+        "cat_feats_and_text__verbose": [0],
     }
 ]
 
 cat_text_definition = {
     "clc": cat_text,
-    "estimator_name": cat_text_name,
+    "estimator_name": cat_text_name,  # now resolves to "cat_feats_and_text"
     "tuned_parameters": cat_text_parameters,
     "randomized_grid": True,
     "n_iter": 5,
     "early": True,
 }
-
 
 ################################################################################
 ####################### CatBoost Text-Only Classifier #########################

@@ -16,12 +16,15 @@ from core.config import (
     PROCESSED_DATA_DIR,
     model_definitions,
 )
+from core.constants import mlflow_models_data
 from core.functions import (
     mlflow_load_model,
     log_mlflow_metrics,
     mlflow_log_parameters_model,
+    mlflow_dumpArtifact,
     return_model_metrics,
     return_model_plots,
+    create_shap_plots,
 )
 
 app = typer.Typer()
@@ -121,8 +124,8 @@ def run_lime(
     if not lime_df.empty:
         word_importance = (
             lime_df.groupby("word")["weight"]
-            .agg(["mean", "std", "count"])
-            .rename(columns={"mean": "mean_weight", "std": "std_weight"})
+            .agg(["mean", "count"])
+            .rename(columns={"mean": "mean_weight", "count": "count"})
             .sort_values("mean_weight", key=abs, ascending=False)
         )
 
@@ -202,18 +205,18 @@ def main(
     features_path: Path = PROCESSED_DATA_DIR / "X.parquet",
     labels_path: Path = PROCESSED_DATA_DIR / "y_dramatic.parquet",
     scoring: str = "average_precision",
-    text_col: str = "summary",
+    text_col: str = "summary_clean",
     n_lime_samples: int = 10,
     output_dir: Path = Path("./models/eval"),
 ):
     """
     Unified evaluation script for all model types:
       - lr, cat           (tabular)
-      - cat_text          (text + tabular, LIME)
+      - cat_feats_and_text (text + tabular, LIME)
       - cat_text_only     (text only, LIME)
     """
 
-    is_text_model = model_type in {"cat_text", "cat_text_only"}
+    is_text_model = model_type in {"cat_feats_and_text", "cat_text_only"}
     is_text_only = model_type == "cat_text_only"
 
     experiment_suffix = "text_model" if is_text_model else "model"
@@ -222,15 +225,16 @@ def main(
     eval_dir = Path(output_dir) / outcome / model_type / pipeline_type
     eval_dir.mkdir(parents=True, exist_ok=True)
 
+    estimator_name = model_definitions[model_type]["estimator_name"]
+    run_name = f"{estimator_name}_{pipeline_type}_training"
+
     ############################################################################
     # Step 1. Load model from MLflow
     ############################################################################
 
-    estimator_name = model_definitions[model_type]["estimator_name"]
-
     model = mlflow_load_model(
         experiment_name=experiment_name,
-        run_name=f"{estimator_name}_{pipeline_type}_training",
+        run_name=run_name,
         model_name=f"{estimator_name}_{outcome}",
     )
 
@@ -247,7 +251,7 @@ def main(
     elif is_text_model:
         X[text_col] = X[text_col].fillna("").astype(str)
     else:
-        X = X.drop(columns=["summary"], errors="ignore")
+        X = X.drop(columns=[text_col], errors="ignore")
 
     ############################################################################
     # Step 3. Get train/valid/test splits
@@ -276,7 +280,6 @@ def main(
         inputs=inputs,
         model=model,
         estimator_name=estimator_name,
-        return_dict=True,
     )
 
     all_plots = return_model_plots(
@@ -308,6 +311,35 @@ def main(
         all_plots.update(lime_artifacts.get("plots", {}))
 
     ############################################################################
+    # Step 5b. SHAP (tree-based models only)
+    ############################################################################
+
+    shap_ran = False
+    shap_figs = {}
+    shap_importance = None
+    shap_importance_expanded = None
+
+    if model_type in {"cat", "cat_feats_and_text", "lr"}:
+        try:
+            logger.info(f"Running SHAP for {model_type} — saving to {eval_dir}")
+            shap_importance_expanded, shap_importance, shap_figs = create_shap_plots(
+                model=model,
+                X_train=X_train,
+                X_test=X_test,
+                y_test=y_test,
+                output_dir=eval_dir,
+                max_display=20,
+                sample_size=200,
+                side_by_side=True,
+            )
+            logger.info(f"SHAP figures generated: {list(shap_figs.keys())}")
+            all_plots.update(shap_figs)
+            shap_ran = True
+            logger.success("SHAP analysis complete.")
+        except Exception as e:
+            logger.exception(f"SHAP failed: {e}")
+
+    ############################################################################
     # Step 6. Save plots to eval_dir
     ############################################################################
 
@@ -318,21 +350,18 @@ def main(
         plt.close(fig)
 
     ############################################################################
-    # Step 7. Log to MLflow
+    # Step 7. Log metrics to MLflow
     ############################################################################
 
     mlflow.set_experiment(experiment_name)
     experiment = mlflow.get_experiment_by_name(experiment_name)
     runs = mlflow.search_runs(
         experiment_ids=[experiment.experiment_id],
-        filter_string=(
-            f"tags.mlflow.runName = '{estimator_name}_{pipeline_type}_training'"
-        ),
+        filter_string=f"tags.mlflow.runName = '{run_name}'",
     )
     run_id = runs.iloc[0]["run_id"]
 
     with mlflow.start_run(run_id=run_id):
-        # Log metrics per split with prefix
         for split_name in ["train", "valid", "test"]:
             split_metrics = {
                 k.replace(f"{split_name} ", ""): v
@@ -343,13 +372,89 @@ def main(
                 safe_name = metric_name.replace("/", "_").replace(" ", "_").lower()
                 mlflow.log_metric(f"{split_name}_{safe_name}", value)
 
-        # Log plots
-        for fname in all_plots:
-            fig_path = eval_dir / fname
-            if fig_path.exists():
-                mlflow.log_artifact(str(fig_path), artifact_path="plots")
+    ############################################################################
+    # Step 8. Log plots to MLflow (PNG + SVG)
+    ############################################################################
 
-    # Log LIME CSVs and HTMLs if present
+    # PNG plots — exclude SHAP figs here since they're logged separately in Step 9
+    non_shap_plots = {k: v for k, v in all_plots.items() if not k.startswith("shap")}
+    log_mlflow_metrics(
+        experiment_name=experiment_name,
+        run_name=run_name,
+        images=non_shap_plots,
+    )
+
+    for name, fig in non_shap_plots.items():
+        mlflow_dumpArtifact(
+            experiment_name=experiment_name,
+            run_name=run_name,
+            obj_name=Path(name).stem,
+            obj=fig,
+            artifacts_data_path=mlflow_models_data,
+            artifact_format="svg",
+        )
+
+    ############################################################################
+    # Step 9. Log SHAP artifacts to MLflow
+    ############################################################################
+
+    if shap_ran:
+        # PNG plots
+        log_mlflow_metrics(
+            experiment_name=experiment_name,
+            run_name=run_name,
+            images={f"{name}.png": fig for name, fig in shap_figs.items()},
+        )
+
+        # SVG plots
+        for name, fig in shap_figs.items():
+            mlflow_dumpArtifact(
+                experiment_name=experiment_name,
+                run_name=run_name,
+                obj_name=name,
+                obj=fig,
+                artifacts_data_path=mlflow_models_data,
+                artifact_format="svg",
+            )
+
+        # Collapsed feature importance CSV
+        mlflow_dumpArtifact(
+            experiment_name=experiment_name,
+            run_name=run_name,
+            obj_name="shap_feature_importance",
+            obj=shap_importance,
+            artifacts_data_path=mlflow_models_data,
+            artifact_format="csv",
+        )
+
+        # Expanded feature importance CSV
+        if not isinstance(shap_importance_expanded, pd.DataFrame):
+            shap_importance_expanded = pd.DataFrame(shap_importance_expanded)
+        mlflow_dumpArtifact(
+            experiment_name=experiment_name,
+            run_name=run_name,
+            obj_name="shap_feature_importance_expanded",
+            obj=shap_importance_expanded,
+            artifacts_data_path=mlflow_models_data,
+            artifact_format="csv",
+        )
+
+        # Expanded beeswarm pkl for Dash app
+        mlflow_dumpArtifact(
+            experiment_name=experiment_name,
+            run_name=run_name,
+            obj_name="shap_beeswarm_expanded",
+            obj=eval_dir / "shap_beeswarm_expanded.pkl",
+            artifacts_data_path=mlflow_models_data,
+            artifact_format="pkl",
+        )
+
+        logger.info("SHAP artifacts logged to MLflow.")
+
+    ############################################################################
+    # Step 10. Log LIME artifacts to MLflow
+    ############################################################################
+
     if lime_artifacts:
         with mlflow.start_run(run_id=run_id):
             lime_csv = eval_dir / "lime_word_importance.csv"
@@ -364,8 +469,7 @@ def main(
                     mlflow.log_artifact(
                         str(html_file), artifact_path="lime/explanations"
                     )
-
-        logger.info("LIME artifacts logged to MLflow")
+        logger.info("LIME artifacts logged to MLflow.")
 
     plt.close("all")
     logger.success("Evaluation complete.")
