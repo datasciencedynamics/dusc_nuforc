@@ -680,7 +680,15 @@ def engineer_rows(rows, city_state_lookup, city_only_lookup):
                 if occurred_dt and reported_date
                 else ""
             ),
-            # Location features
+            # location_count_total: number of times this exact city|state|country
+            # combination appears across the full dataset. Serves as a proxy for
+            # reporting density by location — high values indicate population centers
+            # or known UAP hotspots with frequent filings; low values indicate
+            # geographically rare or isolated reports. Distinct from cluster_id /
+            # in_cluster which measure spatial proximity within 30 km; a city can
+            # have high location_count_total without belonging to any DBSCAN cluster
+            # if its reports are temporally spread out or geocoded to different
+            # coordinates. Computed in Pass 1 of engineer_rows before any filtering.
             "location_count_total": location_counts[loc_key],
             # Geocoding (geocode_method retained for logging; dropped before save)
             "latitude": lat,
