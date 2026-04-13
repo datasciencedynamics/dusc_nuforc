@@ -210,11 +210,6 @@ feat_gen_training:
 		--data-path ./data/processed \
 		2>&1 | tee ./data/processed/5_feat_gen_training.txt
 
-.PHONY: clean_cache
-clean_cache:
-	rm -f ./data/processed/llm_cache.json
-	@echo "LLM cache cleared."
-
 preproc_pipeline: data_gen \
                   nlp_feature_engineer_nuforc \
 				  nuforc_analytics \
@@ -223,35 +218,7 @@ preproc_pipeline: data_gen \
 
 ################################################################################
 ################################# Training #####################################
-################################# LLM Model ####################################
 ################################################################################
-
-define train_llm_model
-	rm -f ./models/train/llm/llm_cache_$(1)_$(2).json
-	$(PYTHON_INTERPRETER) $(PROJECT_DIRECTORY)/modeling/train_llm.py \
-		--features-path ./data/processed/X.parquet \
-		--labels-path ./data/processed/y_dramatic.parquet \
-		--splits-dir ./models/train/splits \
-		--max-workers 10 \
-		--model $(2) \
-		--prompt-type $(1) \
-		--few-shot-n 5 \
-		--cache-path ./models/train/llm/llm_cache_$(1)_$(2).json \
-		--output-path ./models/train/llm/llm_dramatic_preds_$(1)_$(2).parquet \
-	2>&1 | tee models/results/$(OUTCOME)/llm_$(1)_$(2)_train.txt
-endef
-
-train_llm_zero_shot_llama:
-	$(call train_llm_model,zero_shot,llama-3.1-8b-instant)
-
-train_llm_few_shot_llama:
-	$(call train_llm_model,few_shot,llama-3.1-8b-instant)
-
-train_llm_zero_shot_llama70b:
-	$(call train_llm_model,zero_shot,llama-3.3-70b-versatile)
-
-train_llm_few_shot_llama70b:
-	$(call train_llm_model,few_shot,llama-3.3-70b-versatile)
 
 
 define train_text_model
@@ -281,10 +248,6 @@ train_cat:
 
 train_all_tabular: train_lr train_cat
 train_all_ml: train_cat_feats_and_text train_cat_text_only
-train_all_llm: train_llm_zero_shot_llama \
-               train_llm_few_shot_llama \
-               train_llm_zero_shot_llama70b \
-               train_llm_few_shot_llama70b
 
 train_all_models: train_all_tabular train_all_ml 
 
@@ -306,16 +269,17 @@ eval_lr:      ; $(foreach p,$(PIPELINES),$(call eval_model,lr,$(p),$(OUTCOME)) &
 eval_cat:     ; $(foreach p,$(PIPELINES),$(call eval_model,cat,$(p),$(OUTCOME)) &&) true
 eval_cat_feats_and_text:       ; $(call eval_model,cat_feats_and_text,orig,$(OUTCOME))
 eval_cat_text_only:  ; $(call eval_model,cat_text_only,orig,$(OUTCOME))
-eval_llm:
-	$(PYTHON_INTERPRETER) $(PROJECT_DIRECTORY)/modeling/evaluate.py \
-		--model-type llm \
-		--outcome $(OUTCOME) \
-		--llm-preds-path ./models/train/llm/llm_dramatic_preds_zero_shot.parquet \
-		--llm-prompt-type zero_shot \
-		--output-dir ./models/eval
-
 eval_all_models: eval_lr eval_cat eval_cat_feats_and_text eval_cat_text_only
 
+.PHONY: save_predictions
+save_predictions:
+	$(PYTHON_INTERPRETER) $(PROJECT_DIRECTORY)/modeling/save_predictions.py \
+		--outcome dramatic \
+		--text-col summary_clean \
+		--cat-pipeline smote \
+		--lr-pipeline orig \
+		--output-dir ./models/predictions \
+		2>&1 | tee ./models/eval/predictions/save_predictions.txt
 
 .PHONY: bootstrap_eval
 bootstrap_eval:
@@ -427,6 +391,7 @@ preproc_pipeline_inference: data_prep_preprocessing_inference \
     predict \
 	model_explainer_inference \
     model_explanations_inference
+
 #################################################################################
 # Self Documenting Commands                                                     #
 #################################################################################
