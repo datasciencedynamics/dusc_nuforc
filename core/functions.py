@@ -2810,6 +2810,7 @@ def create_shap_plots(
     sample_size: int = 100,
     feature_rename: dict = None,
     side_by_side: bool = False,
+    random_state: int = 222,
 ):
     """
     Create comprehensive SHAP plots for model interpretation.
@@ -2918,6 +2919,7 @@ def create_shap_plots(
 
     n_test = X_test_transformed.shape[0]
     if n_test > sample_size:
+        np.random.seed(random_state)
         sample_indices = np.random.choice(n_test, size=sample_size, replace=False)
         if hasattr(X_test_transformed, "iloc"):
             X_sample_raw = X_test_transformed.iloc[sample_indices]
