@@ -232,13 +232,6 @@ define train_text_model
 	2>&1 | tee models/results/$(OUTCOME)/$(1)_$(2)_train.txt
 endef
 
-# Text models — pipeline_type is ignored internally but passed for MLflow run naming
-train_cat_feats_and_text:
-	$(call train_text_model,cat_feats_and_text,orig)
-
-train_cat_text_only:
-	$(call train_text_model,cat_text_only,orig)
-
 # Tabular models — loop over all pipeline types
 train_lr:
 	$(foreach p,$(PIPELINES),$(call train_text_model,lr,$(p)) &&) true
@@ -246,10 +239,18 @@ train_lr:
 train_cat:
 	$(foreach p,$(PIPELINES),$(call train_text_model,cat,$(p)) &&) true
 
-train_all_tabular: train_lr train_cat
-train_all_ml: train_cat_feats_and_text train_cat_text_only
+# Text models — pipeline_type is ignored internally but passed for MLflow run naming
+train_cat_feats_and_text:
+	$(call train_text_model,cat_feats_and_text,orig)
 
-train_all_models: train_all_tabular train_all_ml 
+train_cat_text_only:
+	$(call train_text_model,cat_text_only,orig)
+
+
+train_all_tabular: train_lr train_cat
+
+train_all_models: train_all_tabular train_cat_feats_and_text train_cat_text_only
+
 
 ################################################################################
 ############################### Model Evaluation ###############################
@@ -269,6 +270,7 @@ eval_lr:      ; $(foreach p,$(PIPELINES),$(call eval_model,lr,$(p),$(OUTCOME)) &
 eval_cat:     ; $(foreach p,$(PIPELINES),$(call eval_model,cat,$(p),$(OUTCOME)) &&) true
 eval_cat_feats_and_text:       ; $(call eval_model,cat_feats_and_text,orig,$(OUTCOME))
 eval_cat_text_only:  ; $(call eval_model,cat_text_only,orig,$(OUTCOME))
+
 eval_all_models: eval_lr eval_cat eval_cat_feats_and_text eval_cat_text_only
 
 .PHONY: save_predictions
