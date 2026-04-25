@@ -46,8 +46,22 @@ def run_lime(
     n_lime_samples: int,
     output_dir: Path,
     is_text_only: bool = False,
+    random_state: int = 222,
 ) -> dict:
-    """Run LIME explainability on text model test set samples."""
+    """Run LIME explainability on text model test set samples.
+
+    Reproducibility
+    ---------------
+    LIME has two sources of randomness that are both seeded by ``random_state``:
+
+      1. Test-sample selection (np.random.choice over predicted-positive and
+         predicted-negative indices) — uses an explicit np.random.RandomState.
+      2. LimeTextExplainer's internal perturbation sampler — receives the same
+         seed via the ``random_state`` kwarg.
+
+    Given the same model, X_test, y_test, y_prob_test, and random_state, the
+    aggregated word-importance plots and CSV are deterministic across runs.
+    """
 
     try:
         from lime.lime_text import LimeTextExplainer
@@ -58,7 +72,15 @@ def run_lime(
     lime_dir = output_dir / "lime_explanations"
     lime_dir.mkdir(parents=True, exist_ok=True)
 
-    explainer = LimeTextExplainer(class_names=["Not Dramatic", "Dramatic"])
+    # Seeded RNG for sample selection. Independent of any global numpy state.
+    rng = np.random.RandomState(random_state)
+
+    # Seeded LIME explainer. random_state is passed through to the underlying
+    # perturbation sampler, making explain_instance deterministic.
+    explainer = LimeTextExplainer(
+        class_names=["Not Dramatic", "Dramatic"],
+        random_state=random_state,
+    )
 
     def predict_fn(texts):
         if is_text_only:
@@ -78,12 +100,12 @@ def run_lime(
 
     n_each = max(1, n_lime_samples // 2)
     sample_pos = (
-        np.random.choice(pos_idx, size=min(n_each, len(pos_idx)), replace=False)
+        rng.choice(pos_idx, size=min(n_each, len(pos_idx)), replace=False)
         if len(pos_idx) > 0
         else np.array([], dtype=int)
     )
     sample_neg = (
-        np.random.choice(neg_idx, size=min(n_each, len(neg_idx)), replace=False)
+        rng.choice(neg_idx, size=min(n_each, len(neg_idx)), replace=False)
         if len(neg_idx) > 0
         else np.array([], dtype=int)
     )
@@ -150,6 +172,7 @@ def run_lime(
         plt.tight_layout()
         fig_path = output_dir / "lime_top_words.png"
         fig1.savefig(fig_path, dpi=150, bbox_inches="tight")
+        fig1.savefig(fig_path.with_suffix(".svg"), bbox_inches="tight")
         plots["lime_top_words.png"] = fig1
         plt.close(fig1)
 
@@ -181,6 +204,7 @@ def run_lime(
                 plt.tight_layout()
                 fpath = output_dir / fname
                 fig.savefig(fpath, dpi=150, bbox_inches="tight")
+                fig.savefig(fpath.with_suffix(".svg"), bbox_inches="tight")
                 plots[fname] = fig
                 plt.close(fig)
 
