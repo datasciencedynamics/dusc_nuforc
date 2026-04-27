@@ -2,8 +2,8 @@
 # ------------------------------------------------------------------------------
 # GLOBALS
 # ------------------------------------------------------------------------------
-PROJECT_NAME = nuforc_media
-PYTHON_VERSION = 3.12
+PROJECT_NAME = dusc_nuforc
+PYTHON_VERSION = 3.12.7
 PYTHON_INTERPRETER = python
 VENV_DIR = nuforc_venv
 CONDA_ENV_NAME = nuforc_conda

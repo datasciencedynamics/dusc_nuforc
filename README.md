@@ -45,7 +45,7 @@ Each tabular model can be run under six pipeline variants that combine class-imb
 ## Project structure
 
 ```
-nuforc_media/
+dusc_nuforc/
 ├── app.py                      # Flask/Dash entry point for the dashboard
 ├── core/                       # Shared config, constants, and utility functions
 │   ├── config.py
