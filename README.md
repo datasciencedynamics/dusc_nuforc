@@ -2,13 +2,17 @@
   <img src="https://raw.githubusercontent.com/datasciencedynamics/datasciencedynamics.github.io/refs/heads/main/data_science_dynamics_logo.svg" alt="Data Science Dynamics" width="200"/>
 </p>
 
-# Dramatic and Unusual UAP Sightings Classifier
-
-<img src="https://raw.githubusercontent.com/datasciencedynamics/datasciencedynamics.github.io/refs/heads/main/dusc_logo.svg" alt="DUSC" align="right" height="160" hspace="20" vspace="10"/>
-
-A machine learning pipeline for classifying reports from the National UFO Reporting Center (NUFORC) by narrative *dramaticness*, a measure of how vivid, detailed, and extraordinary a witness account is. The project combines structured features, free-text NLP, gradient-boosted models, an LLM baseline, and SHAP-based explainability behind a deployed dashboard.
-
-<br clear="all"/>
+<table border="0" cellspacing="0" cellpadding="0">
+  <tr>
+    <td valign="middle" width="75%">
+      <h1>Dramatic and Unusual UAP Sightings Classifier</h1>
+      <p>A machine learning pipeline for classifying reports from the National UFO Reporting Center (NUFORC) by narrative <em>dramaticness</em>, a measure of how vivid, detailed, and extraordinary a witness account is. The project combines structured features, free-text NLP, gradient-boosted models, an LLM baseline, and SHAP-based explainability behind a deployed dashboard.</p>
+    </td>
+    <td valign="middle" align="center">
+      <img src="https://raw.githubusercontent.com/datasciencedynamics/datasciencedynamics.github.io/refs/heads/main/dusc_logo.svg" alt="DUSC" width="220"/>
+    </td>
+  </tr>
+</table>
 
 ## What this project does
 
