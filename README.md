@@ -33,7 +33,7 @@ The work extends RAND's 2023 report *Not the X-Files*, which analyzed geographic
 
 A live version of the dashboard is deployed at:
 
-**[apps.datasciencedynamics.com](https://apps.datasciencedynamics.com)**
+**[apps.datasciencedynamics.com/uap_classifier](https://apps.datasciencedynamics.com/uap_classifier)**
 
 The app is built on a Flask/Dash WSGI dispatcher (entry point: `app.py`) and lets users browse scored reports, inspect per-report SHAP explanations, and explore aggregate patterns in dramaticness across regions, shapes, and report years.
 
