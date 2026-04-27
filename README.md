@@ -8,7 +8,7 @@
       <h1>Dramatic and Unusual UAP Sightings Classifier</h1>
       <p>A machine learning pipeline for classifying reports from the National UFO Reporting Center (NUFORC) by narrative <em>dramaticness</em>, a measure of how vivid, detailed, and extraordinary a witness account is. The project combines structured features, free-text NLP, gradient-boosted models, an LLM baseline, and SHAP-based explainability behind a deployed dashboard.</p>
     </td>
-    <td valign="middle" width="280" align="center">
+    <td valign="middle" width="300" align="center">
       <img src="https://raw.githubusercontent.com/datasciencedynamics/datasciencedynamics.github.io/refs/heads/main/dusc_logo.svg" alt="DUSC" width="300"/>
     </td>
   </tr>
