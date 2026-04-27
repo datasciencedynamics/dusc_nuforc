@@ -5,8 +5,6 @@
 </p>
 
 
-https://raw.githubusercontent.com/lshpaner/flask_apps/refs/heads/master/nuforc/assets/dusc_logo.svg?token=GHSAT0AAAAAADZ7SRHHAOYFUF5XM2MZFBYY2PO2XDQ
-
 # Dramatic and Unusual UAP Sightings Classifier
 
 A machine learning pipeline for classifying reports from the National UFO Reporting Center (NUFORC) by narrative *dramaticness*, a measure of how vivid, detailed, and extraordinary a witness account is. The project combines structured features, free-text NLP, gradient-boosted models, an LLM baseline, and SHAP-based explainability behind a deployed dashboard.
