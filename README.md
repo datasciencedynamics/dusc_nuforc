@@ -1,7 +1,9 @@
 <p align="left">
-  <img src="https://raw.githubusercontent.com/datasciencedynamics/datasciencedynamics.github.io/refs/heads/main/data_science_dynamics_logo.svg" alt="Data Science Dynamics" width="200"/>
+  <img src="https://raw.githubusercontent.com/datasciencedynamics/datasciencedynamics.github.io/refs/heads/main/data_science_dynamics_logo.svg" alt="Data Science Dynamics" height="60"/>
+  &nbsp;&nbsp;
+  <img src="https://raw.githubusercontent.com/lshpaner/flask_apps/master/nuforc/assets/dusc_logo.svg" alt="DUSC" height="100"/>
 </p>
- 
+
 
 # Dramatic and Unusual UAP Sightings Classifier
 
