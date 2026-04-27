@@ -4,7 +4,7 @@ setup(
     name="src",
     packages=find_packages(),
     version="0.1.0",
-    description="cookie-cutter data science re-adapted to be used with the `nuforc_media` project.",
+    description="cookie-cutter data science re-adapted to be used with the `dusc_nuforc` project.",
     author="Leonid Shpaner, Oscar Gil",
     license="MIT",
 )
