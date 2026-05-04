@@ -165,7 +165,8 @@ Data Science Dynamics: [datasciencedynamics.com](https://datasciencedynamics.com
 
 ## References
 
-- Gromis, A. et al. (2023). *Not the X-Files: An Analysis of UFO Reporting in the United States.* RAND Corporation.
+- Posard, M. N., Gromis, A., & Lee, M. (2023). *Not the X-Files: An Analysis of UFO Reporting in the United States.* RAND Corporation. https://www.rand.org/pubs/research_reports/RRA2475-1.html
+- Medina, R. M., Brewer, S. C., & Kirkpatrick, S. M. (2023). An environmental analysis of public UAP sightings and sky view potential. *Scientific Reports*, 13, 22213. https://doi.org/10.1038/s41598-023-49527-x
 - National UFO Reporting Center: [nuforc.org](https://nuforc.org)
 
 ## License
