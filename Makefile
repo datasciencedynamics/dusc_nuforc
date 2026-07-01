@@ -171,6 +171,32 @@ create_folders:
 ####################### Preprocessing (+) Dataprep Pipeline ####################
 ################################################################################
 
+NUFORC_RAW = ./data/raw/NUFORC_DATA_04_10_2026.xlsx
+NUFORC_ENRICHED = ./data/raw/NUFORC_DATA_04_10_2026_enriched.xlsx
+SCRAPE_MIN_DELAY ?= 5
+SCRAPE_MAX_DELAY ?= 8
+
+.PHONY: scrape_nuforc_details
+scrape_nuforc_details:
+	$(PYTHON_INTERPRETER) $(PROJECT_DIRECTORY)/preprocessing/NUFORC_Extractor.py \
+		--input-data-file "$(NUFORC_RAW)" \
+		--output-data-file "$(NUFORC_ENRICHED)" \
+		--checkpoint "./data/raw/nuforc_enrich_checkpoint.jsonl" \
+		--link-col 1 \
+		--min-delay $(SCRAPE_MIN_DELAY) \
+		--max-delay $(SCRAPE_MAX_DELAY) \
+		2>&1 | tee ./data/raw/scrape_nuforc_details.txt
+
+.PHONY: scrape_nuforc_details_test
+scrape_nuforc_details_test:
+	$(PYTHON_INTERPRETER) $(PROJECT_DIRECTORY)/preprocessing/NUFORC_Extractor.py \
+		--input-data-file "$(NUFORC_RAW)" \
+		--output-data-file "$(NUFORC_ENRICHED)" \
+		--checkpoint "./data/raw/nuforc_enrich_checkpoint_test.jsonl" \
+		--test-limit 10 \
+		2>&1 | tee ./data/raw/scrape_nuforc_details_test.txt
+
+
 .PHONY: data_gen
 data_gen:
 	$(PYTHON_INTERPRETER) preprocessing/1_data_gen.py \
