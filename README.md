@@ -159,6 +159,16 @@ Raw and processed data files are gitignored.
       Oscar is a Data Scientist at the University of California, Riverside, with over ten years of experience in the education data management industry. He excels in data warehousing, analytics, machine learning, SQL, Python, R, and report authoring, and holds an M.S. in Applied Data Science from the University of San Diego. He has co-developed analytical tools and pipelines deployed in research and institutional settings, and presented alongside Leon at JupyterCon 2025.
     </td>
   </tr>
+  <tr>
+    <td width="160" valign="top" align="center">
+      <img src="https://raw.githubusercontent.com/datasciencedynamics/datasciencedynamics.github.io/main/photos/sean_torres.jpeg" width="140" alt="Oscar Gil">
+    </td>
+    <td valign="top">
+      <b>Sean Michael Torres, M.S.</b><br><br>
+      Sean is a data analyst with experience across public service, operations, and business analytics. Focused on workflow automation, data quality, business intelligence, and predictive analytics. Builds Python reporting solutions, ETL workflows, Tableau dashboards, and data validation processes that support operational decision-making and improve efficiency.
+    </td>
+  </tr>
+
 </table>
 
 Data Science Dynamics: [datasciencedynamics.com](https://datasciencedynamics.com)
