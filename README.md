@@ -146,7 +146,7 @@ Raw and processed data files are gitignored.
       <img src="https://raw.githubusercontent.com/datasciencedynamics/datasciencedynamics.github.io/main/photos/leonshpaner.jpg" width="140" alt="Leon Shpaner">
     </td>
     <td valign="top">
-      <b><a href="https://leonshpaner.com/" target="_blank" rel="noopener noreferrer"> Leon Shpaner, M.S.</a></b><br><br>
+      <b><a href="https://leonshpaner.com/"> Leon Shpaner, M.S.</a></b><br><br>
       Leon is a Data Scientist at UCLA Health with over 15 years of experience across healthcare, financial services, and education. He serves as an adjunct professor at the University of San Diego, where he teaches statistics and machine learning in the M.S. in Applied Artificial Intelligence program. He has contributed to clinical prediction research, co-developed a production-grade EDA toolkit contracted for publication with Taylor &amp; Francis, and presented at JupyterCon 2025.
     </td>
   </tr>
@@ -155,7 +155,7 @@ Raw and processed data files are gitignored.
       <img src="https://raw.githubusercontent.com/datasciencedynamics/datasciencedynamics.github.io/main/photos/Oscar_LinkedIn_Pic.jpeg" width="140" alt="Oscar Gil">
     </td>
     <td valign="top">
-      <b><a href="https://oscargildata.com/" target="_blank" rel="noopener noreferrer"> Oscar Gil, M.S.</a></b><br><br>
+      <b><a href="https://oscargildata.com/"> Oscar Gil, M.S.</a></b><br><br>
       Oscar is a Data Scientist at the University of California, Riverside, with over ten years of experience in the education data management industry. He excels in data warehousing, analytics, machine learning, SQL, Python, R, and report authoring, and holds an M.S. in Applied Data Science from the University of San Diego. He has co-developed analytical tools and pipelines deployed in research and institutional settings, and presented alongside Leon at JupyterCon 2025.
     </td>
   </tr>
@@ -164,7 +164,7 @@ Raw and processed data files are gitignored.
       <img src="https://raw.githubusercontent.com/datasciencedynamics/datasciencedynamics.github.io/main/photos/sean_torres.jpeg" width="140" alt="Oscar Gil">
     </td>
     <td valign="top">
-      <b><a href="https://github.com/seantorres" target="_blank" rel="noopener noreferrer"> Sean Michael Torres, M.S.</a></b><br><br>
+      <b><a href="https://github.com/seantorres"> Sean Michael Torres, M.S.</a></b><br><br>
       Sean is a data analyst with experience across public service, operations, and business analytics. Focused on workflow automation, data quality, business intelligence, and predictive analytics. Builds Python reporting solutions, ETL workflows, Tableau dashboards, and data validation processes that support operational decision-making and improve efficiency.
     </td>
   </tr>
