@@ -122,6 +122,7 @@ def main(
     ############################################################################
 
     df["summary_clean"] = df["summary_clean"].fillna("").astype(str).str.strip()
+    df["full_text_clean"] = df["full_text_clean"].fillna("").astype(str).str.strip()
 
     ############################################################################
     # Step 4. Clean Categorical Features

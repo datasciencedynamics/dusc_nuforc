@@ -10,7 +10,8 @@ Output columns
   Temporal    : occurred_year, occurred_month, occurred_day, occurred_hour,
                 report_lag_days, is_night, is_weekend
   Location    : location_count_total, latitude, longitude
-  Text        : summary_token_count, summary_clean
+  Text        : summary_token_count, summary_clean,
+                full_text_token_count, full_text_clean
   Shape       : shape_group
   Explanation : exp_drone, exp_rocket, exp_balloon, exp_aircraft,
                 exp_starlink, exp_lantern, exp_satellite, exp_certain
@@ -562,7 +563,8 @@ def build_location_key(city, state, country):
 
 def tokenize_summary(summary):
     """
-    Light tokenization for CatBoost text_features input.
+    Light tokenization for CatBoost text_features input. Used for both the
+    Summary and Full_Text fields (generic: applies stopword/length/digit rules).
     Removes stopwords, short tokens, and pure digits.
     CatBoost handles its own internal tokenization; this is NOT TF-IDF.
     """
@@ -623,6 +625,7 @@ def engineer_rows(rows, city_state_lookup, city_only_lookup):
         row["_occurred_dt"] = occurred_dt
         row["_loc_key"] = loc_key
         row["_tokens"] = tokenize_summary(row.get("Summary", ""))
+        row["_full_tokens"] = tokenize_summary(row.get("Full_Text", ""))
 
         location_counts[loc_key] += 1
 
@@ -632,6 +635,7 @@ def engineer_rows(rows, city_state_lookup, city_only_lookup):
         occurred_dt = row["_occurred_dt"]
         reported_date = to_date_safe(row.get("Reported"))
         tokens = row["_tokens"]
+        full_tokens = row["_full_tokens"]
         loc_key = row["_loc_key"]
         country = str(row.get("Country") or "").strip()
 
@@ -659,6 +663,8 @@ def engineer_rows(rows, city_state_lookup, city_only_lookup):
             "Country": country,
             "Shape": row.get("Shape", ""),
             "Summary": row.get("Summary", ""),
+            "Full_Text": row.get("Full_Text", ""),
+            "text_is_summary_only": row.get("text_is_summary_only", ""),
             "Explanation": row.get("Explanation", ""),
             "Media": row.get("Media", ""),
             # Temporal features
@@ -696,9 +702,14 @@ def engineer_rows(rows, city_state_lookup, city_only_lookup):
             "geocode_method": geo_method,
             # Shape group (collapsed from 20+ NUFORC shapes into 7 categories)
             "shape_group": SHAPE_MAP.get(str(row.get("Shape", "")).strip(), "other"),
-            # Text features -- summary_clean passed to CatBoost via text_features
+            # Text features -- pass either *_clean to CatBoost via text_features
+            # (select with --text-col). Full_Text is the full narrative
+            # (backfilled to Summary for summary-only rows); Summary is NUFORC's
+            # short lead. Both retained so you can A/B without re-running.
             "summary_token_count": len(tokens),
             "summary_clean": " ".join(tokens),
+            "full_text_token_count": len(full_tokens),
+            "full_text_clean": " ".join(full_tokens),
             # Media flag
             "has_media": 1 if row.get("Media") else 0,
             # Days since the most recent major UAP disclosure event prior to

@@ -42,7 +42,6 @@ from core.constants import (
     databricks_username,
 )
 
-
 ################################################################################
 ############################## Preprocessing ###################################
 #                                                                              #
@@ -2834,6 +2833,8 @@ def create_shap_plots(
         feature_importance_df: DataFrame with collapsed feature importance
         figures: Dictionary of matplotlib figures
     """
+
+    plt.rcParams["figure.max_open_warning"] = 0
 
     print("\n" + "=" * 80)
     print("GENERATING SHAP EXPLANATIONS")

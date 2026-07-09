@@ -253,11 +253,15 @@ def main(
         "is_weekend",
         "location_count_total",
         "summary_token_count",
+        "full_text_token_count",
         "days_since_uap_event",
         "cluster_id",
         "in_cluster",
         "summary_clean",
+        "full_text_clean",
         "Summary",
+        "Full_Text",
+        "text_is_summary_only",
     ]
 
     df_out = df[[c for c in output_cols if c in df.columns]].copy()

@@ -12,7 +12,7 @@ Models evaluated
 
 Output
 ------
-  ./models/eval/bootstrap_metrics.csv
+  ./models/eval/bootstrap_metrics_<text_col>.csv
 """
 
 import sys
@@ -81,6 +81,8 @@ def main(
     X_full = pd.read_parquet(features_path)
     y_full = pd.read_parquet(labels_path).squeeze()
 
+    TEXT_COLS = {"summary_clean", "full_text_clean"}
+
     all_results = []
 
     for model_type, pipeline_type in MODEL_RUNS:
@@ -94,26 +96,38 @@ def main(
         experiment_name = f"{outcome}_{experiment_suffix}"
         estimator_name = model_definitions[model_type]["estimator_name"]
 
+        # Text models are keyed by text_col to match train.py's run naming.
+        text_tag = f"_{text_col}" if is_text_model else ""
+        run_name = f"{estimator_name}_{pipeline_type}{text_tag}_training"
+
         # Load model from MLflow
         try:
             model = mlflow_load_model(
                 experiment_name=experiment_name,
-                run_name=f"{estimator_name}_{pipeline_type}_training",
+                run_name=run_name,
                 model_name=f"{estimator_name}_{outcome}",
             )
         except Exception as e:
             logger.warning(f"  Skipping {run_label} — could not load model: {e}")
             continue
 
-        # Prepare X for this model type
+        # Prepare X for this model type (mirror train.py exactly)
         if is_text_only:
             X = X_full[[text_col]].copy()
             X[text_col] = X[text_col].fillna("").astype(str)
         elif is_text_model:
-            X = X_full.copy()
+            other_text_cols = [
+                c for c in TEXT_COLS if c != text_col and c in X_full.columns
+            ]
+            X = X_full.drop(columns=other_text_cols, errors="ignore")
             X[text_col] = X[text_col].fillna("").astype(str)
         else:
-            X = X_full.drop(columns=[text_col], errors="ignore")
+            # Tabular: drop ALL text columns (tokenized AND raw) so nothing
+            # string-typed reaches the numeric transformer / SMOTE.
+            text_all = {"summary_clean", "full_text_clean", "full_text", "summary"}
+            X = X_full.drop(
+                columns=[c for c in text_all if c in X_full.columns], errors="ignore"
+            )
 
         y = y_full.copy()
 
@@ -164,7 +178,9 @@ def main(
     combined = pd.concat(all_results, ignore_index=True)
     combined = combined.round(4)
 
-    out_path = output_dir / output_csv
+    # Key the output filename by text_col so summary vs full_text runs don't
+    # overwrite each other's comparison tables.
+    out_path = output_dir / output_csv.replace(".csv", f"_{text_col}.csv")
     combined.to_csv(out_path, index=False)
     logger.success(f"Bootstrap metrics saved: {out_path}  ({len(combined):,} rows)")
     print(combined.to_string(index=False))

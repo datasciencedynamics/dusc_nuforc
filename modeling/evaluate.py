@@ -246,11 +246,16 @@ def main(
     experiment_suffix = "text_model" if is_text_model else "model"
     experiment_name = f"{outcome}_{experiment_suffix}"
 
-    eval_dir = Path(output_dir) / outcome / model_type / pipeline_type
-    eval_dir.mkdir(parents=True, exist_ok=True)
-
     estimator_name = model_definitions[model_type]["estimator_name"]
-    run_name = f"{estimator_name}_{pipeline_type}_training"
+
+    # Must mirror train.py: text models are keyed by text_col so summary vs
+    # full_text load the correct model and write to a separate folder; tabular
+    # models drop all text, so they have no tag.
+    text_tag = f"_{text_col}" if is_text_model else ""
+    run_name = f"{estimator_name}_{pipeline_type}{text_tag}_training"
+
+    eval_dir = Path(output_dir) / outcome / model_type / f"{pipeline_type}{text_tag}"
+    eval_dir.mkdir(parents=True, exist_ok=True)
 
     ############################################################################
     # Step 1. Load model from MLflow
@@ -269,13 +274,21 @@ def main(
     X = pd.read_parquet(features_path)
     y = pd.read_parquet(labels_path).squeeze()
 
+    TEXT_COLS = {"summary_clean", "full_text_clean"}
+    other_text_cols = [c for c in TEXT_COLS if c != text_col and c in X.columns]
+
     if is_text_only:
         X = X[[text_col]].copy()
         X[text_col] = X[text_col].fillna("").astype(str)
     elif is_text_model:
+        X = X.drop(columns=other_text_cols, errors="ignore")
         X[text_col] = X[text_col].fillna("").astype(str)
     else:
-        X = X.drop(columns=[text_col], errors="ignore")
+        # Tabular only: drop ALL text columns
+        X = X.drop(
+            columns=[c for c in TEXT_COLS if c in X.columns],
+            errors="ignore",
+        )
 
     ############################################################################
     # Step 3. Get train/valid/test splits

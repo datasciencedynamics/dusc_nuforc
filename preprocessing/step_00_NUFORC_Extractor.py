@@ -161,25 +161,39 @@ def parse_page(html, label_map, output_cols):
         if label in label_map:
             fields[label_map[label]] = val
 
+    # Drop scripts/styles so JS never leaks into the narrative.
+    for tag in primary.find_all(["script", "style"]):
+        tag.decompose()
+
     # Narrative: flatten <br> to newlines, then keep only witness lines.
     for br in primary.find_all("br"):
         br.replace_with("\n")
     raw = primary.get_text("\n", strip=True)
 
-    lines, seen = [], set()
+    posted_re = re.compile(r"^Posted\s+\d{4}-\d{2}-\d{2}")
+    lines, seen, consumed_values = [], set(), set()
     for line in (clean(x) for x in raw.split("\n")):
         if not line:
             continue
         if line.startswith("NUFORC UFO Sighting"):
             continue
-        if line.startswith("Posted ") or re.match(r"Posted\s+\d{4}-\d{2}-\d{2}", line):
-            break
+        # Skip the "Posted ..." marker but DO NOT stop: on the newer template the
+        # report body can render after it, and breaking here dropped it (that was
+        # the truncation bug). Just skip this line and keep scanning.
+        if line.startswith("Posted ") or posted_re.match(line):
+            continue
         low = line.lower()
-        if low in field_values:  # a structured value
+        # Drop a field value only ONCE, at its label-adjacent occurrence. If the
+        # same text shows up again it's the witness body (which can legitimately
+        # equal a field like Location details), so keep it.
+        if low in field_values and low not in consumed_values:
+            consumed_values.add(low)
             continue
         if line.rstrip(":") in bare_labels:  # a bare label line
             continue
         if line in NAV_FOOTER or line.startswith("Copyright"):
+            continue
+        if "Unauthorized reproduction" in line:  # NUFORC anti-scrape comment text
             continue
         if low in seen:  # dedupe repeated summary
             continue
@@ -276,16 +290,20 @@ def main():
             return cell.hyperlink.target
         return cell.value if str(cell.value).startswith("http") else None
 
-    # progress bar counts only rows still needing a live fetch
+    # One bar over ALL rows, so progress is visible whether we're fetching or
+    # just rebuilding the xlsx from cache. Postfix shows live-fetch count.
     todo = sum(1 for r in rows if (s := sighting_id(url_of(r))) and s not in done)
-    bar = tqdm(total=todo, unit="page", desc="NUFORC", dynamic_ncols=True)
+    bar = tqdm(total=len(rows), unit="row", desc="Building xlsx", dynamic_ncols=True)
+    bar.set_postfix_str(f"to fetch: {todo}")
 
-    since_save = 0
+    fetched = 0
+    since_fetch_save = 0
     blocked = False
     for r in rows:
         url = url_of(r)
         sid = sighting_id(url)
         if not sid:
+            bar.update(1)
             continue
 
         if sid in done:
@@ -310,25 +328,30 @@ def main():
                 }
             append_checkpoint(args.checkpoint, rec)
             done[sid] = rec
-            bar.update(1)
-            bar.set_postfix_str(f"id={sid} color={rec.get('Color', '')!r}")
+            fetched += 1
+            since_fetch_save += 1
+            bar.set_postfix_str(f"fetched={fetched}/{todo} id={sid}")
             time.sleep(random.uniform(args.min_delay, args.max_delay))
+
+            # Only checkpoint-save the xlsx after real fetches (crash safety
+            # for long runs). On a pure rebuild there are no fetches, so no
+            # repeated saves -- that was the "stuck" hang.
+            if since_fetch_save >= args.save_every:
+                wb.save(args.output_data_file)
+                since_fetch_save = 0
 
         for name in output_cols:
             ws.cell(row=r, column=headers[name], value=rec.get(name, ""))
-
-        since_save += 1
-        if since_save >= args.save_every:
-            wb.save(args.output_data_file)
-            since_save = 0
+        bar.update(1)
 
     bar.close()
+    print("Writing workbook to disk (one save, ~a minute for 20k rows)...")
     wb.save(args.output_data_file)
-    print(f"\nSaved {Path(args.output_data_file).resolve()}")
+    print(f"Saved {Path(args.output_data_file).resolve()}")
     if blocked:
         print("Stopped early on a block. Rerun the same command to continue.")
     else:
-        print("All requested rows processed.")
+        print(f"All requested rows processed ({fetched} fetched this run).")
 
 
 if __name__ == "__main__":

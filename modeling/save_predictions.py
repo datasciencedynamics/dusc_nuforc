@@ -75,15 +75,20 @@ def main(
 
     logger.info("Loading models from MLflow...")
 
+    # Text models are keyed by text_col to match train.py's run naming
+    # (e.g. cat_feats_and_text_orig_full_text_clean_training). Tabular models
+    # drop all text, so they have no tag.
+    text_tag = f"_{text_col}"
+
     model_cat_feats_and_text = mlflow_load_model(
         experiment_name=f"{outcome}_text_model",
-        run_name="cat_feats_and_text_orig_training",
+        run_name=f"cat_feats_and_text_orig{text_tag}_training",
         model_name=f"cat_feats_and_text_{outcome}",
     )
 
     model_cat_text_only = mlflow_load_model(
         experiment_name=f"{outcome}_text_model",
-        run_name="cat_text_only_orig_training",
+        run_name=f"cat_text_only_orig{text_tag}_training",
         model_name=f"cat_text_only_{outcome}",
     )
 
@@ -110,16 +115,27 @@ def main(
     X_full = pd.read_parquet(PROCESSED_DATA_DIR / "X.parquet")
     y = pd.read_parquet(PROCESSED_DATA_DIR / f"y_{outcome}.parquet").squeeze()
 
-    # Prepare X variants matching train.py preprocessing logic
+    # Prepare X variants matching train.py preprocessing logic.
+    TEXT_COLS = {"summary_clean", "full_text_clean"}
+    other_text_cols = [c for c in TEXT_COLS if c != text_col and c in X_full.columns]
+
+    # Feats + text: drop drop_vars AND the OTHER text column, keep selected text_col.
     X_feats_and_text = X_full.drop(
-        columns=[c for c in drop_vars if c in X_full.columns], errors="ignore"
+        columns=[c for c in drop_vars if c in X_full.columns] + other_text_cols,
+        errors="ignore",
     )
     X_feats_and_text[text_col] = X_feats_and_text[text_col].fillna("").astype(str)
 
+    # Text only: just the selected text column.
     X_text_only = X_full[[text_col]].copy()
     X_text_only[text_col] = X_text_only[text_col].fillna("").astype(str)
 
-    X_tabular = X_full.drop(columns=[text_col], errors="ignore")
+    # Tabular: drop ALL text columns (tokenized AND raw) so nothing string-typed
+    # reaches the numeric transformer / SMOTE.
+    text_all = {"summary_clean", "full_text_clean", "full_text", "summary"}
+    X_tabular = X_full.drop(
+        columns=[c for c in text_all if c in X_full.columns], errors="ignore"
+    )
 
     ############################################################################
     # Step 3. Get test splits

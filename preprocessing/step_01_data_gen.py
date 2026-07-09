@@ -22,7 +22,7 @@ print("#" * 80 + "\n")
 
 @app.command()
 def main(
-    input_data_file: str = "./data/raw/NUFORC_DATA.xlsx",
+    input_data_file: str = "./data/raw/NUFORC_DATA_04_10_2026.xlsx",
     output_data_file: str = "./data/raw/nuforc_data.parquet",
 ):
     """
@@ -67,6 +67,23 @@ def main(
             f"Unsupported file format: {input_path.suffix}. Use .csv, .parquet, or .xlsx"
         )
 
+    # Step 2.5 — drop fully-blank rows (trailing empty row from the xlsx).
+    # A row with no Occurred AND no Summary AND no Full_Text carries no signal
+    # and breaks the downstream parquet write (empty occurred_year mixed with
+    # ints). Drop it at the source so nothing downstream has to guard against it.
+    before = len(df)
+    text_cols = [c for c in ("Summary", "Full_Text") if c in df.columns]
+    blank_text = (
+        df[text_cols]
+        .fillna("")
+        .apply(lambda r: not any(str(v).strip() for v in r), axis=1)
+        if text_cols
+        else True
+    )
+    blank_occurred = pd.to_datetime(df["Occurred"], errors="coerce").isna()
+    df = df[~(blank_occurred & blank_text)].copy()
+    print(f"Dropped {before - len(df)} fully-blank row(s); {len(df)} remain.")
+
     ############################################################################
     # Step 3. Generate Index and Set It
     ############################################################################
@@ -94,8 +111,8 @@ def main(
     # Step 4. Save to parquet
     ############################################################################
 
-    df["Summary"]  = df["Summary"].astype(str)
-    df["State"]    = df["State"].astype(str)
+    df["Summary"] = df["Summary"].astype(str)
+    df["State"] = df["State"].astype(str)
     df["Occurred"] = pd.to_datetime(df["Occurred"], errors="coerce")
     df["Reported"] = pd.to_datetime(df["Reported"], errors="coerce")
     print(f"\n{df.head()}")

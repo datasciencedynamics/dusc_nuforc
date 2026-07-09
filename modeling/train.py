@@ -67,18 +67,25 @@ def main(
     X = pd.read_parquet(features_path)
     y = pd.read_parquet(labels_path).squeeze()
 
+    # All candidate text columns. Only the selected text_col should survive into
+    # X; any other text column must be dropped so it doesn't leak into the model
+    # as an undeclared string feature.
+    TEXT_COLS = {"summary_clean", "full_text_clean"}
+    other_text_cols = [c for c in TEXT_COLS if c != text_col and c in X.columns]
+
     if is_text_only:
-        # Text-only ablation: keep nothing but summary
+        # Text-only ablation: keep nothing but the chosen text column
         X = X[[text_col]].copy()
         X[text_col] = X[text_col].fillna("").astype(str)
     elif is_text_model:
-        # Text + tabular: drop drop_vars (e.g. city) but retain numeric/cat cols
-        cols_to_drop = [c for c in drop_vars if c in X.columns]
+        # Text + tabular: drop drop_vars (e.g. city) AND any other text column,
+        # keeping only the selected text_col as the text feature.
+        cols_to_drop = [c for c in drop_vars if c in X.columns] + other_text_cols
         X = X.drop(columns=cols_to_drop, errors="ignore")
         X[text_col] = X[text_col].fillna("").astype(str)
     else:
-        # Tabular only: drop raw text column
-        X = X.drop(columns=["summary_clean"], errors="ignore")
+        # Tabular only: drop ALL text columns
+        X = X.drop(columns=[c for c in TEXT_COLS if c in X.columns], errors="ignore")
 
     ################################################################################
     # Step 4. Retrieve Model and Pipeline Configurations
@@ -176,11 +183,18 @@ def main(
 
     experiment_suffix = "text_model" if is_text_model else "model"
 
+    # Text models differ by which text column they use; keep their runs separate
+    # so summary vs full_text don't overwrite each other in MLflow. Tabular
+    # models drop all text, so they're identical regardless of text_col -> no tag.
+    text_tag = f"_{text_col}" if is_text_model else ""
+    experiment_name = f"{outcome}_{experiment_suffix}"
+    run_name = f"{estimator_name}_{pipeline_type}{text_tag}_training"
+
     if pretrained:
         print("Loading Pretrained Model...")
         model = mlflow_load_model(
-            experiment_name=f"{outcome}_{experiment_suffix}",
-            run_name=f"{estimator_name}_{pipeline_type}_training",
+            experiment_name=experiment_name,
+            run_name=run_name,
             model_name=f"{estimator_name}_{outcome}",
         )
 
@@ -285,8 +299,8 @@ def main(
 
     if pretrained:
         mlflow_log_parameters_model(
-            experiment_name=f"{outcome}_{experiment_suffix}",
-            run_name=f"{estimator_name}_{pipeline_type}_training",
+            experiment_name=experiment_name,
+            run_name=run_name,
             model_name=f"{estimator_name}_{outcome}",
             model=model,
         )
@@ -296,8 +310,8 @@ def main(
             n_iter=n_iter,
             kfold=False,
             outcome=outcome,
-            experiment_name=f"{outcome}_{experiment_suffix}",
-            run_name=f"{estimator_name}_{pipeline_type}_training",
+            experiment_name=experiment_name,
+            run_name=run_name,
             model_name=f"{estimator_name}_{outcome}",
             model=model,
             hyperparam_dict=model.best_params_per_score[scoring],

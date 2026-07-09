@@ -77,7 +77,17 @@ rfe = RFE(
 ################################################################################
 
 categorical_cols = ["shape", "country"]
-text_features = ["summary_clean"]
+
+# All candidate text columns that must never be treated as numeric. The model
+# selects which one to use as the CatBoost text feature at runtime via
+# --text-col; the others are dropped in train/evaluate. Raw (untokenized)
+# text columns are never modeled.
+text_candidates = ["summary_clean", "full_text_clean"]
+raw_text_cols = ["summary", "full_text"]
+
+# text_features is what the ColumnTransformer path excludes from numeric.
+# Keep it broad so no text column leaks into the numeric transformer.
+text_features = text_candidates
 
 # Load feature column names from MLflow
 try:
@@ -92,13 +102,14 @@ try:
 except Exception as e:
     raise Exception(f"Failed to load X_columns_list: {str(e)}")
 
-# Numerical cols: exclude categorical and text columns
+# Numerical cols: exclude categorical, ALL text candidates, and raw text.
 numerical_cols = [
     col
     for col in X_columns_list
-    if col not in categorical_cols and col not in text_features
+    if col not in categorical_cols
+    and col not in text_candidates
+    and col not in raw_text_cols
 ]
-
 
 ################################################################################
 ############################### Transformers ###################################

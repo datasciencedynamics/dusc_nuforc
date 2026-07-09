@@ -14,6 +14,7 @@ PROJECT_DIRECTORY := $(abspath $(MAKEFILE_DIR))
 ############################## Training Globals ################################
 
 OUTCOME := dramatic
+TEXT_COL = full_text_clean
 PIPELINES := orig smote under orig_rfe smote_rfe under_rfe
 PIPELINES = orig smote under orig_rfe smote_rfe under_rfe
 SCORING = average_precision
@@ -166,75 +167,153 @@ create_folders:
 		mkdir -p models/results/$$outcome; \
 		mkdir -p models/eval/$$outcome; \
 	done
-################################################################################
-################################### Training ###################################
-####################### Preprocessing (+) Dataprep Pipeline ####################
-################################################################################
 
-NUFORC_RAW = ./data/raw/NUFORC_DATA_04_10_2026.xlsx
-NUFORC_ENRICHED = ./data/raw/NUFORC_DATA_04_10_2026_enriched.xlsx
+################################################################################
+# NUFORC shared vars
+################################################################################
+NUFORC_RAW        = ./data/raw/NUFORC_DATA_04_10_2026.xlsx
+NUFORC_ENRICHED   = ./data/raw/NUFORC_DATA_04_10_2026_enriched.xlsx
+NUFORC_CHECKPOINT = ./data/raw/nuforc_enrich_checkpoint_TEST.jsonl
 SCRAPE_MIN_DELAY ?= 5
 SCRAPE_MAX_DELAY ?= 8
 
+################################################################################
+# PREPROCESSING -- step_00 detail scraper (part of the real pipeline)
+################################################################################
+
+# Full scrape: walks all rows, fetches only those not already in the checkpoint.
 .PHONY: scrape_nuforc_details
 scrape_nuforc_details:
-	$(PYTHON_INTERPRETER) $(PROJECT_DIRECTORY)/preprocessing/NUFORC_Extractor.py \
+	$(PYTHON_INTERPRETER) $(PROJECT_DIRECTORY)/preprocessing/step_00_NUFORC_Extractor.py \
 		--input-data-file "$(NUFORC_RAW)" \
 		--output-data-file "$(NUFORC_ENRICHED)" \
-		--checkpoint "./data/raw/nuforc_enrich_checkpoint.jsonl" \
+		--checkpoint "$(NUFORC_CHECKPOINT)" \
 		--link-col 1 \
 		--min-delay $(SCRAPE_MIN_DELAY) \
 		--max-delay $(SCRAPE_MAX_DELAY) \
 		2>&1 | tee ./data/raw/scrape_nuforc_details.txt
 
+# Alias for clarity when re-fetching a pruned subset (same script, same args).
+.PHONY: rescrape_nuforc_details
+rescrape_nuforc_details: scrape_nuforc_details
+
+# Re-scrape at a faster delay. Run AFTER debug_prune_* , not chained, so
+# resuming never re-prunes already-fixed rows. Override delays as needed.
+.PHONY: rescrape_nuforc_fast
+rescrape_nuforc_fast:
+	$(MAKE) scrape_nuforc_details SCRAPE_MIN_DELAY=2 SCRAPE_MAX_DELAY=3
+
+# Smoke test: first 10 rows into a separate checkpoint + separate output.
 .PHONY: scrape_nuforc_details_test
 scrape_nuforc_details_test:
-	$(PYTHON_INTERPRETER) $(PROJECT_DIRECTORY)/preprocessing/NUFORC_Extractor.py \
+	$(PYTHON_INTERPRETER) $(PROJECT_DIRECTORY)/preprocessing/step_00_NUFORC_Extractor.py \
 		--input-data-file "$(NUFORC_RAW)" \
-		--output-data-file "$(NUFORC_ENRICHED)" \
-		--checkpoint "./data/raw/nuforc_enrich_checkpoint_test.jsonl" \
+		--output-data-file "./data/raw/NUFORC_DATA_04_10_2026_enriched_TEST.xlsx" \
+		--checkpoint "./data/raw/nuforc_enrich_checkpoint_SMOKE.jsonl" \
 		--test-limit 10 \
 		2>&1 | tee ./data/raw/scrape_nuforc_details_test.txt
 
+################################################################################
+# DEBUG / ONE-OFF MAINTENANCE -- debug_scripts/ (NOT part of the pipeline)
+################################################################################
+
+NUFORC_BACKFILLED = ./data/raw/NUFORC_DATA_04_10_2026.xlsx
+
+# Backfill Full_Text from Summary for summary-only reports (no scraping, local
+# column edit). Adds a text_is_summary_only flag and reports class balance of
+# affected rows. Run AFTER the scrape is clean, BEFORE data_gen.
+.PHONY: backfill_nuforc_text
+backfill_nuforc_text:
+	$(PYTHON_INTERPRETER) $(PROJECT_DIRECTORY)/debug_scripts/backfill_summary_text.py \
+		--input-file "$(NUFORC_RAW)" \
+		--output-file "$(NUFORC_BACKFILLED)" \
+		--outcome-col $(OUTCOME) \
+		2>&1 | tee ./data/raw/step_02_backfill_summary_text.txt
+
+# Audit: bucket every row so you can confirm the truncation is gone.
+.PHONY: debug_audit_truncation
+debug_audit_truncation:
+	$(PYTHON_INTERPRETER) $(PROJECT_DIRECTORY)/debug_scripts/audit_truncation.py \
+		2>&1 | tee ./data/raw/debug_audit_truncation.txt
+
+# Prune truncated rows (empty or Full_Text == Summary) from the checkpoint.
+.PHONY: debug_prune_truncated
+debug_prune_truncated:
+	cp "$(NUFORC_CHECKPOINT)" "$(NUFORC_CHECKPOINT).bak"
+	$(PYTHON_INTERPRETER) $(PROJECT_DIRECTORY)/debug_scripts/prune_truncated_checkpoint.py \
+		2>&1 | tee ./data/raw/debug_prune_truncated.txt
+
+# Combined prune: SCRAPE FAILED + empty + Full_Text==Summary in one pass.
+.PHONY: debug_prune_all
+debug_prune_all:
+	$(PYTHON_INTERPRETER) $(PROJECT_DIRECTORY)/debug_scripts/prune_all_questionable.py \
+		--enriched-file "$(NUFORC_RAW)" \
+		--checkpoint "$(NUFORC_CHECKPOINT)" \
+		2>&1 | tee ./data/raw/debug_prune_all.txt
+
+# Verify the parser fix on real pages before a mass re-scrape.
+.PHONY: debug_verify_fix
+debug_verify_fix:
+	PYTHONPATH=$(PROJECT_DIRECTORY) $(PYTHON_INTERPRETER) $(PROJECT_DIRECTORY)/debug_scripts/verify_fix.py \
+		2>&1 | tee ./data/raw/debug_verify_fix.txt
+
+# Export the empty/==Summary rows to a standalone workbook for manual review.
+.PHONY: debug_export_summary_eq
+debug_export_summary_eq:
+	$(PYTHON_INTERPRETER) $(PROJECT_DIRECTORY)/debug_scripts/summary_equals_full_text.py \
+		--enriched-file "$(NUFORC_RAW)" \
+		--output-file "./data/raw/NUFORC_review_summary_eq_full_text.xlsx" \
+		2>&1 | tee ./data/raw/debug_export_summary_eq.txt
+
+# One-off structural diagnostic on a single short page.
+.PHONY: debug_inspect_short
+debug_inspect_short:
+	$(PYTHON_INTERPRETER) $(PROJECT_DIRECTORY)/debug_scripts/less_than_120_char.py \
+		2>&1 | tee ./data/raw/debug_inspect_short.txt
+
+################################################################################
+################################### Training ###################################
+####################### Preprocessing (+) Dataprep Pipeline ####################
+################################################################################
 
 .PHONY: data_gen
 data_gen:
-	$(PYTHON_INTERPRETER) preprocessing/1_data_gen.py \
+	$(PYTHON_INTERPRETER) preprocessing/step_01_data_gen.py \
 		--input-data-file "./data/raw/NUFORC_DATA_04_10_2026.xlsx" \
 		--output-data-file "./data/raw/nuforc_data.parquet" \
-		2>&1 | tee ./data/raw/1_data_gen.txt
+		2>&1 | tee ./data/raw/step_01_data_gen.txt
 
 .PHONY: nlp_feature_engineer_nuforc
 nlp_feature_engineer_nuforc:
-	$(PYTHON_INTERPRETER) $(PROJECT_DIRECTORY)/preprocessing/2_nlp_feature_engineer_nuforc.py \
+	$(PYTHON_INTERPRETER) $(PROJECT_DIRECTORY)/preprocessing/step_03_nlp_feature_engineer_nuforc.py \
 		--input-parquet "./data/raw/nuforc_data.parquet" \
 		--output-parquet "./data/processed/nuforc_engineered.parquet" \
 		--output-metadata "./data/processed/nuforc_feature_metadata.json" \
-		2>&1 | tee ./data/processed/2_nlp_feature_engineer_nuforc.txt
+		2>&1 | tee ./data/processed/step_03_nlp_feature_engineer_nuforc.txt
 
 .PHONY: nuforc_analytics
 nuforc_analytics:
-	$(PYTHON_INTERPRETER) $(PROJECT_DIRECTORY)/preprocessing/3_nuforc_analytics.py \
+	$(PYTHON_INTERPRETER) $(PROJECT_DIRECTORY)/preprocessing/step_04_nuforc_analytics.py \
 		--input-parquet "./data/processed/nuforc_engineered.parquet" \
 		--output-parquet "./data/processed/NUFORC_enriched.parquet" \
-		2>&1 | tee ./data/processed/3_nuforc_analytics.txt
+		2>&1 | tee ./data/processed/step_04_nuforc_analytics.txt
 
 .PHONY: data_prep_preprocessing_training
 data_prep_preprocessing_training:
-	$(PYTHON_INTERPRETER) $(PROJECT_DIRECTORY)/preprocessing/4_preprocessing_remaining_feats.py \
+	$(PYTHON_INTERPRETER) $(PROJECT_DIRECTORY)/preprocessing/step_05_preprocessing_remaining_feats.py \
 		--input-data-file ./data/processed/NUFORC_enriched.parquet \
 		--output-data-file ./data/processed/df_sans_zero_missing.parquet \
 		--stage training \
 		--data-path ./data/processed \
-		2>&1 | tee ./data/processed/4_preprocessing_remaining_feats.txt
+		2>&1 | tee ./data/processed/step_05_preprocessing_remaining_feats.txt
 
 .PHONY: feat_gen_training
 feat_gen_training:
-	$(PYTHON_INTERPRETER) $(PROJECT_DIRECTORY)/preprocessing/5_feat_gen.py \
+	$(PYTHON_INTERPRETER) $(PROJECT_DIRECTORY)/preprocessing/step_06_feat_gen.py \
 		--input-data-file ./data/processed/df_sans_zero_missing.parquet \
 		--stage training \
 		--data-path ./data/processed \
-		2>&1 | tee ./data/processed/5_feat_gen_training.txt
+		2>&1 | tee ./data/processed/step_06_feat_gen_training.txt
 
 preproc_pipeline: data_gen \
                   nlp_feature_engineer_nuforc \
@@ -246,16 +325,15 @@ preproc_pipeline: data_gen \
 ################################# Training #####################################
 ################################################################################
 
-
 define train_text_model
 	$(PYTHON_INTERPRETER) $(PROJECT_DIRECTORY)/modeling/train.py \
 		--model-type $(1) \
 		--pipeline-type $(2) \
-		--text-col summary_clean \
+		--text-col $(TEXT_COL) \
 		--outcome $(OUTCOME) \
 		--scoring average_precision \
 		--pretrained 0 \
-	2>&1 | tee models/results/$(OUTCOME)/$(1)_$(2)_train.txt
+	2>&1 | tee models/results/$(OUTCOME)/$(1)_$(2)_$(TEXT_COL)_train.txt
 endef
 
 # Tabular models — loop over all pipeline types
@@ -283,41 +361,44 @@ train_all_models: train_all_tabular train_cat_feats_and_text train_cat_text_only
 ################################################################################
 
 define eval_model
-	mkdir -p models/eval/$(3)/$(1)/$(2)
+	mkdir -p models/eval/$(3)/$(1)/$(2)/$(TEXT_COL)
 	$(PYTHON_INTERPRETER) $(PROJECT_DIRECTORY)/modeling/evaluate.py \
 		--model-type $(1) \
 		--pipeline-type $(2) \
 		--outcome $(3) \
+		--text-col $(TEXT_COL) \
 		--output-dir ./models/eval \
-	2>&1 | tee models/eval/$(3)/$(1)/$(2)/eval.txt
+	2>&1 | tee models/eval/$(3)/$(1)/$(2)/$(TEXT_COL)/eval.txt
 endef
 
 eval_lr:      ; $(foreach p,$(PIPELINES),$(call eval_model,lr,$(p),$(OUTCOME)) &&) true
 eval_cat:     ; $(foreach p,$(PIPELINES),$(call eval_model,cat,$(p),$(OUTCOME)) &&) true
-eval_cat_feats_and_text:       ; $(call eval_model,cat_feats_and_text,orig,$(OUTCOME))
-eval_cat_text_only:  ; $(call eval_model,cat_text_only,orig,$(OUTCOME))
+eval_cat_feats_and_text:  ; $(call eval_model,cat_feats_and_text,orig,$(OUTCOME))
+eval_cat_text_only:       ; $(call eval_model,cat_text_only,orig,$(OUTCOME))
 
 eval_all_models: eval_lr eval_cat eval_cat_feats_and_text eval_cat_text_only
+
 
 .PHONY: save_predictions
 save_predictions:
 	$(PYTHON_INTERPRETER) $(PROJECT_DIRECTORY)/modeling/save_predictions.py \
-		--outcome dramatic \
-		--text-col summary_clean \
+		--outcome $(OUTCOME) \
+		--text-col $(TEXT_COL) \
 		--cat-pipeline smote \
 		--lr-pipeline orig \
-		--output-dir ./models/predictions \
-		2>&1 | tee ./models/eval/predictions/save_predictions.txt
+		--output-dir ./models/predictions/$(TEXT_COL) \
+		2>&1 | tee ./models/eval/predictions/save_predictions_$(TEXT_COL).txt
 
 .PHONY: bootstrap_eval
 bootstrap_eval:
 	$(PYTHON_INTERPRETER) $(PROJECT_DIRECTORY)/modeling/bootstrap_evaluation.py \
-		--outcome dramatic \
+		--outcome $(OUTCOME) \
+		--text-col $(TEXT_COL) \
 		--n-samples -1 \
 		--num-resamples 5000 \
 		--output-dir ./models/eval \
 		--output-csv bootstrap_metrics.csv \
-		2>&1 | tee ./models/eval/bootstrap_eval.txt
+		2>&1 | tee ./models/eval/bootstrap_eval_$(TEXT_COL).txt
 		# --n-samples -1 means use full test set size (len(X_test))
 
 ################################ Modeling Pipeline #############################
