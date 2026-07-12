@@ -26,6 +26,7 @@ loading these files directly instead of loading models from MLflow.
 Usage
 -----
     python modeling/save_predictions.py
+    python modeling/save_predictions.py --text-col full_text_clean --drop-year 1
 
 Models loaded
 -------------
@@ -33,6 +34,18 @@ Models loaded
   cat_text_only       : text-only CatBoost ablation
   cat (smote)         : best tabular CatBoost
   lr  (orig)          : best logistic regression
+
+The --drop-year ablation
+------------------------
+The NUFORC dramatic-flag rate swings 5-fold across the study period (3.6% in
+2022 vs 18.0% in 2024-25) with no corresponding change in the phenomena being
+reported, so occurred_year proxies the editorial regime that labeled a report
+rather than anything about the sighting itself. --drop-year 1 loads the text
+models trained without it and rebuilds their X to match.
+
+Only the TEXT models have _noyear variants. The tabular cat/lr models were
+trained with occurred_year and still expect that column, so X_tabular is left
+alone even when --drop-year is set.
 """
 
 import json
@@ -59,6 +72,7 @@ def main(
     cat_pipeline: str = "smote",
     lr_pipeline: str = "orig",
     output_dir: Path = Path("./models/predictions"),
+    drop_year: int = 0,
 ):
     """
     Load the four best models from MLflow, generate predicted probabilities
@@ -75,20 +89,26 @@ def main(
 
     logger.info("Loading models from MLflow...")
 
-    # Text models are keyed by text_col to match train.py's run naming
-    # (e.g. cat_feats_and_text_orig_full_text_clean_training). Tabular models
-    # drop all text, so they have no tag.
+    # Text models are keyed by text_col AND by the year ablation, matching
+    # train.py's run naming (e.g.
+    # cat_feats_and_text_orig_full_text_clean_noyear_training). Tabular models
+    # drop all text and were never re-run without occurred_year, so they carry
+    # neither tag.
     text_tag = f"_{text_col}"
+    year_tag = "_noyear" if drop_year else ""
+
+    if drop_year:
+        logger.info("Ablation: loading text models trained WITHOUT occurred_year.")
 
     model_cat_feats_and_text = mlflow_load_model(
         experiment_name=f"{outcome}_text_model",
-        run_name=f"cat_feats_and_text_orig{text_tag}_training",
+        run_name=f"cat_feats_and_text_orig{text_tag}{year_tag}_training",
         model_name=f"cat_feats_and_text_{outcome}",
     )
 
     model_cat_text_only = mlflow_load_model(
         experiment_name=f"{outcome}_text_model",
-        run_name=f"cat_text_only_orig{text_tag}_training",
+        run_name=f"cat_text_only_orig{text_tag}{year_tag}_training",
         model_name=f"cat_text_only_{outcome}",
     )
 
@@ -119,19 +139,28 @@ def main(
     TEXT_COLS = {"summary_clean", "full_text_clean"}
     other_text_cols = [c for c in TEXT_COLS if c != text_col and c in X_full.columns]
 
-    # Feats + text: drop drop_vars AND the OTHER text column, keep selected text_col.
+    # Only the feats+text model was retrained without occurred_year. Whatever
+    # columns train.py dropped, this must drop identically, or the feature count
+    # will not match the fitted model.
+    year_cols = ["occurred_year"] if drop_year else []
+
+    # Feats + text: drop drop_vars, the OTHER text column, and (if ablating)
+    # occurred_year. Keep the selected text_col.
     X_feats_and_text = X_full.drop(
-        columns=[c for c in drop_vars if c in X_full.columns] + other_text_cols,
+        columns=[c for c in drop_vars if c in X_full.columns]
+        + other_text_cols
+        + year_cols,
         errors="ignore",
     )
     X_feats_and_text[text_col] = X_feats_and_text[text_col].fillna("").astype(str)
 
-    # Text only: just the selected text column.
+    # Text only: just the selected text column. occurred_year was never in it.
     X_text_only = X_full[[text_col]].copy()
     X_text_only[text_col] = X_text_only[text_col].fillna("").astype(str)
 
     # Tabular: drop ALL text columns (tokenized AND raw) so nothing string-typed
-    # reaches the numeric transformer / SMOTE.
+    # reaches the numeric transformer / SMOTE. occurred_year stays: the tabular
+    # models were trained with it.
     text_all = {"summary_clean", "full_text_clean", "full_text", "summary"}
     X_tabular = X_full.drop(
         columns=[c for c in text_all if c in X_full.columns], errors="ignore"
@@ -151,6 +180,7 @@ def main(
     X_test_lr, _ = model_lr.get_test_data(X_tabular, y)
 
     logger.info(f"  Test set size: {len(y_test):,} rows")
+    logger.info(f"  Feats+text features: {X_test_feats_and_text.shape[1]}")
 
     ############################################################################
     # Step 4. Generate predicted probabilities

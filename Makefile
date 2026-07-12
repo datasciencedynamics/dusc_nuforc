@@ -15,6 +15,7 @@ PROJECT_DIRECTORY := $(abspath $(MAKEFILE_DIR))
 
 OUTCOME := dramatic
 TEXT_COL = full_text_clean
+DROP_YEAR = 1
 PIPELINES := orig smote under orig_rfe smote_rfe under_rfe
 PIPELINES = orig smote under orig_rfe smote_rfe under_rfe
 SCORING = average_precision
@@ -325,6 +326,11 @@ preproc_pipeline: data_gen \
 ################################# Training #####################################
 ################################################################################
 
+# Tag ablation runs so they never collide with the baseline in MLflow,
+# in the results logs, or in the eval output dirs.
+YEAR_TAG := $(if $(filter-out 0,$(DROP_YEAR)),_noyear,)
+
+
 define train_text_model
 	$(PYTHON_INTERPRETER) $(PROJECT_DIRECTORY)/modeling/train.py \
 		--model-type $(1) \
@@ -332,8 +338,9 @@ define train_text_model
 		--text-col $(TEXT_COL) \
 		--outcome $(OUTCOME) \
 		--scoring average_precision \
+		--drop-year $(DROP_YEAR) \
 		--pretrained 0 \
-	2>&1 | tee models/results/$(OUTCOME)/$(1)_$(2)_$(TEXT_COL)_train.txt
+	2>&1 | tee models/results/$(OUTCOME)/$(1)_$(2)_$(TEXT_COL)$(YEAR_TAG)_train.txt
 endef
 
 # Tabular models — loop over all pipeline types
@@ -361,14 +368,15 @@ train_all_models: train_all_tabular train_cat_feats_and_text train_cat_text_only
 ################################################################################
 
 define eval_model
-	mkdir -p models/eval/$(3)/$(1)/$(2)/$(TEXT_COL)
+	mkdir -p models/eval/$(3)/$(1)/$(2)$(TEXT_COL)$(YEAR_TAG)
 	$(PYTHON_INTERPRETER) $(PROJECT_DIRECTORY)/modeling/evaluate.py \
 		--model-type $(1) \
 		--pipeline-type $(2) \
 		--outcome $(3) \
 		--text-col $(TEXT_COL) \
+		--drop-year $(DROP_YEAR) \
 		--output-dir ./models/eval \
-	2>&1 | tee models/eval/$(3)/$(1)/$(2)/$(TEXT_COL)/eval.txt
+	2>&1 | tee models/eval/$(3)/$(1)/$(2)_$(TEXT_COL)$(YEAR_TAG)_eval.txt
 endef
 
 eval_lr:      ; $(foreach p,$(PIPELINES),$(call eval_model,lr,$(p),$(OUTCOME)) &&) true
@@ -381,24 +389,27 @@ eval_all_models: eval_lr eval_cat eval_cat_feats_and_text eval_cat_text_only
 
 .PHONY: save_predictions
 save_predictions:
+	mkdir -p ./models/eval/predictions ./models/predictions/$(TEXT_COL)$(YEAR_TAG)
 	$(PYTHON_INTERPRETER) $(PROJECT_DIRECTORY)/modeling/save_predictions.py \
 		--outcome $(OUTCOME) \
 		--text-col $(TEXT_COL) \
+		--drop-year $(DROP_YEAR) \
 		--cat-pipeline smote \
 		--lr-pipeline orig \
-		--output-dir ./models/predictions/$(TEXT_COL) \
-		2>&1 | tee ./models/eval/predictions/save_predictions_$(TEXT_COL).txt
+		--output-dir ./models/predictions/$(TEXT_COL)$(YEAR_TAG) \
+		2>&1 | tee ./models/eval/predictions/save_predictions_$(TEXT_COL)$(YEAR_TAG).txt
 
 .PHONY: bootstrap_eval
 bootstrap_eval:
 	$(PYTHON_INTERPRETER) $(PROJECT_DIRECTORY)/modeling/bootstrap_evaluation.py \
 		--outcome $(OUTCOME) \
 		--text-col $(TEXT_COL) \
+		--drop-year $(DROP_YEAR) \
 		--n-samples -1 \
 		--num-resamples 5000 \
 		--output-dir ./models/eval \
 		--output-csv bootstrap_metrics.csv \
-		2>&1 | tee ./models/eval/bootstrap_eval_$(TEXT_COL).txt
+		2>&1 | tee ./models/eval/bootstrap_eval_$(TEXT_COL)$(YEAR_TAG).txt
 		# --n-samples -1 means use full test set size (len(X_test))
 
 ################################ Modeling Pipeline #############################

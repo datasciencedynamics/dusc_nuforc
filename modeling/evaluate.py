@@ -45,6 +45,7 @@ def run_lime(
     scoring: str,
     n_lime_samples: int,
     output_dir: Path,
+    drop_year: int = 0,
     is_text_only: bool = False,
     random_state: int = 222,
 ) -> dict:
@@ -232,6 +233,7 @@ def main(
     text_col: str = "summary_clean",
     n_lime_samples: int = 10,
     output_dir: Path = Path("./models/eval"),
+    drop_year: int = 0,
 ):
     """
     Unified evaluation script for all model types:
@@ -252,11 +254,16 @@ def main(
     # full_text load the correct model and write to a separate folder; tabular
     # models drop all text, so they have no tag.
     text_tag = f"_{text_col}" if is_text_model else ""
-    run_name = f"{estimator_name}_{pipeline_type}{text_tag}_training"
+    ablation_tag = "_noyear" if drop_year else ""
+    run_name = f"{estimator_name}_{pipeline_type}{text_tag}{ablation_tag}_training"
 
-    eval_dir = Path(output_dir) / outcome / model_type / f"{pipeline_type}{text_tag}"
+    eval_dir = (
+        Path(output_dir)
+        / outcome
+        / model_type
+        / f"{pipeline_type}{text_tag}{ablation_tag}"
+    )
     eval_dir.mkdir(parents=True, exist_ok=True)
-
     ############################################################################
     # Step 1. Load model from MLflow
     ############################################################################
@@ -273,6 +280,11 @@ def main(
 
     X = pd.read_parquet(features_path)
     y = pd.read_parquet(labels_path).squeeze()
+
+    # Must mirror train.py's ablation: the no-year model was fitted without
+    # occurred_year, so evaluating it against an X that still has that column
+    # is a feature-count mismatch.
+    X = X.drop(columns=["occurred_year"] if drop_year else [], errors="ignore")
 
     TEXT_COLS = {"summary_clean", "full_text_clean"}
     other_text_cols = [c for c in TEXT_COLS if c != text_col and c in X.columns]

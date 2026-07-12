@@ -3,12 +3,18 @@ import csv
 import sys
 
 csv.field_size_limit(sys.maxsize)
+from black.output import _out
 import typer
 from loguru import logger
 import pandas as pd
 from sklearn.preprocessing import FunctionTransformer
 from sklearn.calibration import CalibratedClassifierCV
+from sklearn.frozen import FrozenEstimator
 from model_tuner import Model
+import model_tuner
+
+print(f"\nmodel_tuner version: {model_tuner.__version__}\n")
+
 from typing import Optional
 
 sys.path.append(str(Path(__file__).resolve().parents[1]))
@@ -52,6 +58,7 @@ def main(
     text_col: str = "summary_clean",
     scoring: str = "average_precision",
     pretrained: int = 0,
+    drop_year: int = 0,
 ):
     # Derive labels_path from outcome if not explicitly provided
     if labels_path is None:
@@ -66,6 +73,16 @@ def main(
 
     X = pd.read_parquet(features_path)
     y = pd.read_parquet(labels_path).squeeze()
+
+    # Ablation: occurred_year is the top SHAP feature but only spans 2021-2026,
+    # two of which are partial years. pct_certain swings from 14.2% (2021) to
+    # 1.1% (2022), so the model may be learning NUFORC's editorial regime rather
+    # than anything about the sighting. Drop it to quantify how much of the
+    # reported AP depends on that artifact.
+    ablation_cols = ["occurred_year"] if drop_year else []
+    X = X.drop(columns=ablation_cols, errors="ignore")
+
+    X.drop(columns=["occurred_year"], errors="ignore", inplace=True)
 
     # All candidate text columns. Only the selected text_col should survive into
     # X; any other text column must be dropped so it doesn't leak into the model
@@ -187,8 +204,9 @@ def main(
     # so summary vs full_text don't overwrite each other in MLflow. Tabular
     # models drop all text, so they're identical regardless of text_col -> no tag.
     text_tag = f"_{text_col}" if is_text_model else ""
+    ablation_tag = "_noyear" if drop_year else ""
     experiment_name = f"{outcome}_{experiment_suffix}"
-    run_name = f"{estimator_name}_{pipeline_type}{text_tag}_training"
+    run_name = f"{estimator_name}_{pipeline_type}{text_tag}{ablation_tag}_training"
 
     if pretrained:
         print("Loading Pretrained Model...")
@@ -276,7 +294,7 @@ def main(
         # through CalibratedClassifierCV cleanly. The model is already fitted in
         # Step 10, so cv="prefit" just adjusts probabilities on the validation set.
         model.estimator = CalibratedClassifierCV(
-            model.estimator, cv="prefit", method="sigmoid"
+            FrozenEstimator(model.estimator), method="sigmoid"
         ).fit(X_valid, y_valid)
     elif model_type in {"xgb", "cat"}:
         if model.calibrate:
@@ -284,6 +302,32 @@ def main(
     else:
         if model.calibrate:
             model.calibrateModel(X, y, score=scoring)
+
+    ################################################################################
+    # Step 11b. Export native CatBoost model + calibration for deployment
+    # MLflow's pickle round-trip corrupts CatBoost's text dictionary, so the
+    # deployment artifact must be written here, in-process, before MLflow logging.
+    ################################################################################
+
+    if is_text_model:
+        import json
+
+        _cc = model.estimator.calibrated_classifiers_[0]
+        _cb = _cc.estimator.steps[-1][1]
+
+        _out = Path("./models/deploy")
+        _out.mkdir(parents=True, exist_ok=True)
+
+        _cb.save_model(str(_out / f"{estimator_name}_{text_col}{ablation_tag}.cbm"))
+
+        _calib = _cc.calibrators[0]
+        with open(
+            _out / f"{estimator_name}_{text_col}{ablation_tag}_calibration.json", "w"
+        ) as f:
+            json.dump({"a": float(_calib.a_), "b": float(_calib.b_)}, f, indent=2)
+
+        print(">>> threshold after train:", model.threshold)
+        logger.success(f"Deployment artifacts written to {_out}")
 
     ################################################################################
     # Step 12. Evaluate and Log to MLflow
