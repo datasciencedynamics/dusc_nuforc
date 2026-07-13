@@ -1,0 +1,108 @@
+<svg width="100%" viewBox="0 0 400 400" role="img" xmlns="http://www.w3.org/2000/svg">
+  <title>DUSC - Dramatic and Unusual Sightings Classifier</title>
+  <desc>Circular radar logo with DUSC centered, a saucer drifting beneath it, tagline curving the bottom inside the rings</desc>
+  <defs>
+    <radialGradient id="glow9" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#1D9E75" stop-opacity="0.18"/>
+      <stop offset="100%" stop-color="#1D9E75" stop-opacity="0"/>
+    </radialGradient>
+    <path id="tA7" d="M 200,200 m -134,0 a 134,134 0 1,1 268,0"/>
+    <path id="bA7" d="M 200,200 m -142.9,0 a 142.9,142.9 0 0,0 285.8,0"/>
+
+    <style>
+      /* continuous figure-eight drift: x = 40 sin t, y = 12 sin 2t */
+      @keyframes dusc-fly {
+        0%    { transform: translate(0px,    0px); }
+        12.5% { transform: translate(28.3px, 12px); }
+        25%   { transform: translate(40px,   0px); }
+        37.5% { transform: translate(28.3px,-12px); }
+        50%   { transform: translate(0px,    0px); }
+        62.5% { transform: translate(-28.3px,12px); }
+        75%   { transform: translate(-40px,  0px); }
+        87.5% { transform: translate(-28.3px,-12px); }
+        100%  { transform: translate(0px,    0px); }
+      }
+      /* banks into each turn, pivoting on its own hull */
+      @keyframes dusc-bank {
+        0%    { transform: rotate(0deg); }
+        12.5% { transform: rotate(2.83deg); }
+        25%   { transform: rotate(4deg); }
+        37.5% { transform: rotate(2.83deg); }
+        50%   { transform: rotate(0deg); }
+        62.5% { transform: rotate(-2.83deg); }
+        75%   { transform: rotate(-4deg); }
+        87.5% { transform: rotate(-2.83deg); }
+        100%  { transform: rotate(0deg); }
+      }
+      @keyframes dusc-blink { 0%,100% { opacity: 1; } 50% { opacity: 0.25; } }
+
+      /* --- speed: lower the duration to fly faster, raise it to slow down --- */
+      .dusc-fly  { animation: dusc-fly 7s linear infinite; }
+      .dusc-bank { animation: dusc-bank 7s linear infinite;
+                   transform-box: view-box; transform-origin: 200px 240px; }
+      .dusc-lamp { animation: dusc-blink 1.1s ease-in-out infinite; }
+
+      @media (prefers-reduced-motion: reduce) {
+        .dusc-fly, .dusc-bank, .dusc-lamp { animation: none; }
+      }
+    </style>
+  </defs>
+
+  <circle cx="200" cy="200" r="155" fill="url(#glow9)"/>
+
+  <circle cx="200" cy="200" r="168" fill="none" stroke="#1D9E75" stroke-width="1"   opacity="0.4"/>
+  <circle cx="200" cy="200" r="158" fill="none" stroke="#1D9E75" stroke-width="2"   opacity="0.7"/>
+  <circle cx="200" cy="200" r="152" fill="none" stroke="#1D9E75" stroke-width="0.5" opacity="0.4"/>
+  <circle cx="200" cy="200" r="130" fill="none" stroke="#1D9E75" stroke-width="0.5" opacity="0.4"/>
+  <circle cx="200" cy="200" r="100" fill="none" stroke="#1D9E75" stroke-width="0.5" opacity="0.4"/>
+  <circle cx="200" cy="200" r="70"  fill="none" stroke="#1D9E75" stroke-width="0.5" opacity="0.45"/>
+  <circle cx="200" cy="200" r="40"  fill="none" stroke="#1D9E75" stroke-width="0.5" opacity="0.5"/>
+
+  <line x1="70"  y1="200" x2="330" y2="200" stroke="#1D9E75" stroke-width="0.5" opacity="0.3"/>
+  <line x1="200" y1="70"  x2="200" y2="330" stroke="#1D9E75" stroke-width="0.5" opacity="0.3"/>
+  <line x1="108" y1="108" x2="292" y2="292" stroke="#1D9E75" stroke-width="0.5" opacity="0.18"/>
+  <line x1="292" y1="108" x2="108" y2="292" stroke="#1D9E75" stroke-width="0.5" opacity="0.18"/>
+
+  <path d="M200,200 L200,72 A128,128 0 0,1 310,262 Z" fill="#1D9E75" opacity="0.07"/>
+  <line x1="200" y1="200" x2="310" y2="262" stroke="#1D9E75" stroke-width="1" opacity="0.45"/>
+  <line x1="200" y1="200" x2="200" y2="72"  stroke="#1D9E75" stroke-width="1" opacity="0.45"/>
+
+  <!-- Saucer: drifts a figure-eight beneath the wordmark -->
+  <g class="dusc-fly">
+    <g class="dusc-bank">
+      <ellipse cx="200" cy="240" rx="54" ry="14" fill="#0F6E56" stroke="#5DCAA5" stroke-width="1"/>
+      <ellipse cx="200" cy="230" rx="24" ry="13" fill="#085041" stroke="#5DCAA5" stroke-width="0.8"/>
+      <ellipse cx="200" cy="251" rx="36" ry="5.5" fill="#1D9E75" opacity="0.35"/>
+      <circle class="dusc-lamp" style="animation-delay:0s"    cx="162" cy="240" r="2.5" fill="#9FE1CB"/>
+      <circle class="dusc-lamp" style="animation-delay:0.36s" cx="178" cy="245" r="2.5" fill="#5DCAA5"/>
+      <circle class="dusc-lamp" style="animation-delay:0.72s" cx="200" cy="247" r="2.5" fill="#9FE1CB"/>
+      <circle class="dusc-lamp" style="animation-delay:1.08s" cx="222" cy="245" r="2.5" fill="#5DCAA5"/>
+      <circle class="dusc-lamp" style="animation-delay:1.44s" cx="238" cy="240" r="2.5" fill="#9FE1CB"/>
+    </g>
+  </g>
+
+  <circle cx="268" cy="142" r="3.5" fill="#5DCAA5" opacity="0.9"/>
+  <circle cx="270" cy="141" r="1.5" fill="#E1F5EE"/>
+  <circle cx="130" cy="258" r="2.5" fill="#5DCAA5" opacity="0.6"/>
+  <circle cx="245" cy="165" r="2"   fill="#5DCAA5" opacity="0.5"/>
+  <circle cx="148" cy="138" r="1.8" fill="#9FE1CB" opacity="0.5"/>
+
+  <g stroke="#1D9E75" stroke-width="1.2" opacity="0.6">
+    <line x1="200" y1="32"  x2="200" y2="44"/>
+    <line x1="200" y1="356" x2="200" y2="368"/>
+    <line x1="32"  y1="200" x2="44"  y2="200"/>
+    <line x1="356" y1="200" x2="368" y2="200"/>
+  </g>
+
+  <text x="200" y="195" text-anchor="middle"
+        font-family="'Helvetica Neue', Helvetica, Arial, sans-serif"
+        font-size="52" font-weight="700" fill="#1D9E75" letter-spacing="8">DUSC</text>
+
+  <text font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="13" font-weight="700" fill="#1D9E75" letter-spacing="3.5">
+    <textPath href="#tA7" startOffset="50%" text-anchor="middle">UAP SIGHTINGS CLASSIFICATIONS</textPath>
+  </text>
+
+  <text font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="12" font-weight="700" fill="#1D9E75" letter-spacing="2.2">
+    <textPath href="#bA7" startOffset="50%" text-anchor="middle">DRAMATIC AND UNUSUAL SIGHTINGS CLASSIFIER</textPath>
+  </text>
+</svg>
