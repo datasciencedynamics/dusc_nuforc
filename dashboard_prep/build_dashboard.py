@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """
-build_dashboard_data.py
-=======================
+build_dashboard.py
+==================
 Collapse save_predictions.py's outputs into the single frame the dashboard
-reads: one column per model, one row per test observation, plus the true label.
+reads: one column per model, one row per test observation, the true label, and
+the grouping features the subgroup panel needs.
 
-Five columns, not eight. Only cat_feats_and_text was retrained without
+Five model columns, not eight. Only cat_feats_and_text was retrained without
 occurred_year — the tabular cat/lr models were fit WITH the year and were never
 re-run, and cat_text_only never had the year to begin with. Their "_noyear"
 files are byte-identical copies. Emitting all eight would put three identical
@@ -32,6 +33,7 @@ from pathlib import Path
 import pandas as pd
 
 PRED_ROOT = Path("models/predictions")
+ENRICHED = Path("data/processed/NUFORC_enriched.parquet")
 OUT_DIR = Path("../flask_apps/dusc_nuforc_dash/data")
 
 # (output column, source subdirectory, model key in the filenames)
@@ -55,6 +57,22 @@ THRESH_KEYS = {
     "cat_text_only": "CatBoost Text Only",
     "cat_feats_and_text": "CatBoost Feats + Text",
 }
+
+# Grouping features for the subgroup panel — the same eleven the cohort
+# crosstabs use, so the two panels describe the same cuts of the data.
+GROUP_COLS = [
+    "Shape",
+    "shape_group",
+    "Country",
+    "occurred_year",
+    "occurred_month",
+    "occurred_hour",
+    "is_night",
+    "is_weekend",
+    "has_media",
+    "in_cluster",
+    "exp_certain",
+]
 
 
 def main():
@@ -89,12 +107,36 @@ def main():
     df["y_val"] = y_test.reindex(df.index)
     assert df["y_val"].notna().all(), "label/probability index mismatch"
 
+    ############################################################################
+    # Grouping columns for the subgroup panel.
+    #
+    # Joined ON INDEX from the enriched frame — the test rows are a subset of it,
+    # and a positional assignment would silently mislabel every subgroup.
+    ############################################################################
+    have = pd.read_parquet(ENRICHED).columns
+    use = [c for c in GROUP_COLS if c in have]
+    for c in GROUP_COLS:
+        if c not in have:
+            print(f"  skip: {c} not in {ENRICHED.name}")
+
+    groups = pd.read_parquet(ENRICHED, columns=use).reindex(df.index)
+
+    unmatched = groups.isna().all(axis=1).sum()
+    if unmatched:
+        raise SystemExit(
+            f"{unmatched} test rows have no match in {ENRICHED} — the index does "
+            "not align, so subgroups cannot be attributed to the right reports."
+        )
+
+    df = pd.concat([df, groups], axis=1)
+
     df.to_csv(OUT_DIR / "models.csv", index=False)
     (OUT_DIR / "thresholds.json").write_text(json.dumps(thresholds, indent=2))
 
-    print(f"{df.shape[0]:,} rows x {df.shape[1]} cols -> {OUT_DIR / 'models.csv'}")
-    print()
-    print(df.mean().round(4).to_string())
+    model_cols = [c for c, _, _ in SPECS]
+    print(f"\n{df.shape[0]:,} rows x {df.shape[1]} cols -> {OUT_DIR / 'models.csv'}")
+    print(f"  {len(model_cols)} model columns, {len(use)} grouping columns\n")
+    print(df[model_cols + ["y_val"]].mean().round(4).to_string())
 
 
 if __name__ == "__main__":
