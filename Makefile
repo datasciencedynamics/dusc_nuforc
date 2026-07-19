@@ -277,7 +277,6 @@ debug_inspect_short:
 		2>&1 | tee ./data/raw/debug_inspect_short.txt
 
 ################################################################################
-################################### Training ###################################
 ####################### Preprocessing (+) Dataprep Pipeline ####################
 ################################################################################
 
@@ -321,11 +320,34 @@ feat_gen_training:
 		--data-path ./data/processed \
 		2>&1 | tee ./data/processed/step_06_feat_gen_training.txt
 
+################################################################################
+# EDA frame -- raw reports joined to engineered features
+################################################################################
+
+EDA_RAW    ?= ./data/raw/nuforc_data.parquet
+EDA_MODEL  ?= ./data/processed/df_final.parquet
+EDA_OUT    ?= ./data/processed/df_eda.parquet
+EDA_FORMAT ?= parquet
+EDA_HOW    ?= inner
+
+.PHONY: build_eda_frame
+build_eda_frame:
+	$(PYTHON_INTERPRETER) $(PROJECT_DIRECTORY)/preprocessing/step_07_build_eda_frame.py \
+		--raw-path "$(EDA_RAW)" \
+		--model-path "$(EDA_MODEL)" \
+		--output-path "$(EDA_OUT)" \
+		--output-format $(EDA_FORMAT) \
+		--join-key report_id \
+		--how $(EDA_HOW) \
+		--keep-index 1 \
+		2>&1 | tee ./data/processed/step_07_build_eda_frame.txt
+
 preproc_pipeline: data_gen \
                   nlp_feature_engineer_nuforc \
-				  nuforc_analytics \
-				  data_prep_preprocessing_training  \
-				  feat_gen_training
+                  nuforc_analytics \
+                  data_prep_preprocessing_training \
+                  feat_gen_training \
+                  build_eda_frame
 
 ################################################################################
 ################################# Training #####################################
