@@ -458,6 +458,45 @@ bootstrap_eval:
 		2>&1 | tee ./models/eval/bootstrap_eval_$(TEXT_COL)$(YEAR_TAG).txt
 		# --n-samples -1 means use full test set size (len(X_test))
 
+
+################################################################################
+################################################################################
+################################ BERT Fine-Tuning ##############################
+################################################################################
+
+################################################################################
+################################ BERT Fine-Tuning ##############################
+################################################################################
+
+# Deliberately NOT $(TEXT_COL). The transformer takes raw narratives; the
+# cleaned column is stopword-stripped for CatBoost's BoW/BM25 calcers.
+BERT_TEXT_COL      ?= full_text_clean
+BERT_MAX_LENGTH    ?= 512
+BERT_N_TRIALS      ?= 15
+BERT_INPUT         ?= ./data/processed/df_final.parquet
+BERT_SKIP_OPTIMIZE ?= 0
+
+.PHONY: train_bert
+train_bert:
+	mkdir -p models/eval/$(OUTCOME)/bert models/results/$(OUTCOME)
+	$(PYTHON_INTERPRETER) $(PROJECT_DIRECTORY)/modeling/train_bert.py \
+		--features-path "$(BERT_INPUT)" \
+		--models-dir ./models \
+		--text-col $(BERT_TEXT_COL) \
+		--outcome $(OUTCOME) \
+		--max-length $(BERT_MAX_LENGTH) \
+		--n-trials $(BERT_N_TRIALS) \
+		--scoring avg_precision \
+		--tracking-uri ./mlruns \
+		--output-dir ./models/eval \
+		--skip-optimize $(BERT_SKIP_OPTIMIZE) \
+	2>&1 | tee models/results/$(OUTCOME)/bert_$(BERT_TEXT_COL)_train.txt
+
+# Retrain from an existing study without repeating the Optuna search.
+.PHONY: train_bert_final_only
+train_bert_final_only:
+	$(MAKE) train_bert BERT_SKIP_OPTIMIZE=1
+
 ################################ Modeling Pipeline #############################
 ### Shortcut to run full modeling pipeline: training, evaluation
 ################################################################################

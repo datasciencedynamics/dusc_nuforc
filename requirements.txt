@@ -1,6 +1,7 @@
 beautifulsoup4==4.15.0
 bertuner==0.1.1
 black==24.10.0
+datasets==3.6.0
 eda_toolkit==0.0.28
 -e .
 geonamescache==3.0.1
@@ -12,10 +13,11 @@ model_metrics==0.0.5a9
 model_tuner==0.0.34b8
 nbstripout==0.8.2
 openpyxl==3.1.5
+pyarrow==18.1.0
 python-dotenv==1.0.1
 pytest==8.3.4
 pytest-cov==6.0.0
-requests==2.31.0
+requests==2.34.2
 setuptools==82.0.1
 shap==0.46.0
 typer==0.15.1
