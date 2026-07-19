@@ -15,7 +15,11 @@ PROJECT_DIRECTORY := $(abspath $(MAKEFILE_DIR))
 
 OUTCOME := dramatic
 TEXT_COL = full_text_clean
-DROP_YEAR = 1
+# DROP_YEAR must be assigned before YEAR_TAG is referenced, and YEAR_TAG must be
+# recursive (=, not :=) so overrides on the command line or from a sub-make
+# propagate into the tag.
+DROP_YEAR = 0
+YEAR_TAG = $(if $(filter-out 0,$(DROP_YEAR)),_noyear,)
 PIPELINES := orig smote under orig_rfe smote_rfe under_rfe
 PIPELINES = orig smote under orig_rfe smote_rfe under_rfe
 SCORING = average_precision
@@ -312,6 +316,7 @@ data_prep_preprocessing_training:
 feat_gen_training:
 	$(PYTHON_INTERPRETER) $(PROJECT_DIRECTORY)/preprocessing/step_06_feat_gen.py \
 		--input-data-file ./data/processed/df_sans_zero_missing.parquet \
+		--output-data-file ./data/processed/df_final.parquet \
 		--stage training \
 		--data-path ./data/processed \
 		2>&1 | tee ./data/processed/step_06_feat_gen_training.txt
@@ -326,11 +331,6 @@ preproc_pipeline: data_gen \
 ################################# Training #####################################
 ################################################################################
 
-# Tag ablation runs so they never collide with the baseline in MLflow,
-# in the results logs, or in the eval output dirs.
-YEAR_TAG := $(if $(filter-out 0,$(DROP_YEAR)),_noyear,)
-
-
 define train_text_model
 	$(PYTHON_INTERPRETER) $(PROJECT_DIRECTORY)/modeling/train.py \
 		--model-type $(1) \
@@ -343,32 +343,41 @@ define train_text_model
 	2>&1 | tee models/results/$(OUTCOME)/$(1)_$(2)_$(TEXT_COL)$(YEAR_TAG)_train.txt
 endef
 
-# Tabular models — loop over all pipeline types
+# Tabular models -- loop over all pipeline types
 train_lr:
 	$(foreach p,$(PIPELINES),$(call train_text_model,lr,$(p)) &&) true
 
 train_cat:
 	$(foreach p,$(PIPELINES),$(call train_text_model,cat,$(p)) &&) true
 
-# Text models — pipeline_type is ignored internally but passed for MLflow run naming
+# Text models -- pipeline_type is ignored internally but passed for MLflow run naming
 train_cat_feats_and_text:
 	$(call train_text_model,cat_feats_and_text,orig)
 
 train_cat_text_only:
 	$(call train_text_model,cat_text_only,orig)
 
-
+# Rollups
 train_all_tabular: train_lr train_cat
+
+train_cat_text_only_and_tab_text: train_cat_text_only train_cat_feats_and_text
 
 train_all_models: train_all_tabular train_cat_feats_and_text train_cat_text_only
 
+.PHONY: train_lr train_cat train_cat_feats_and_text train_cat_text_only \
+        train_all_tabular train_cat_text_only_and_tab_text train_all_models
 
 ################################################################################
 ############################### Model Evaluation ###############################
 ################################################################################
 
+# Mirrors evaluate.py: text models are keyed by text_col, tabular models drop
+# all text and carry no tag. Keeping this in one place stops the Makefile's
+# directory layout from drifting away from what evaluate.py actually writes.
+TEXT_TAG_FOR = $(if $(filter cat_feats_and_text cat_text_only,$(1)),_$(TEXT_COL),)
+
 define eval_model
-	mkdir -p models/eval/$(3)/$(1)/$(2)$(TEXT_COL)$(YEAR_TAG)
+	mkdir -p models/eval/$(3)/$(1)
 	$(PYTHON_INTERPRETER) $(PROJECT_DIRECTORY)/modeling/evaluate.py \
 		--model-type $(1) \
 		--pipeline-type $(2) \
@@ -376,7 +385,7 @@ define eval_model
 		--text-col $(TEXT_COL) \
 		--drop-year $(DROP_YEAR) \
 		--output-dir ./models/eval \
-	2>&1 | tee models/eval/$(3)/$(1)/$(2)_$(TEXT_COL)$(YEAR_TAG)_eval.txt
+	2>&1 | tee models/eval/$(3)/$(1)/$(2)$(call TEXT_TAG_FOR,$(1))$(YEAR_TAG)_eval.txt
 endef
 
 eval_lr:      ; $(foreach p,$(PIPELINES),$(call eval_model,lr,$(p),$(OUTCOME)) &&) true
@@ -384,8 +393,45 @@ eval_cat:     ; $(foreach p,$(PIPELINES),$(call eval_model,cat,$(p),$(OUTCOME)) 
 eval_cat_feats_and_text:  ; $(call eval_model,cat_feats_and_text,orig,$(OUTCOME))
 eval_cat_text_only:       ; $(call eval_model,cat_text_only,orig,$(OUTCOME))
 
+# Rollups
+eval_cat_text_only_and_tab_text: eval_cat_text_only eval_cat_feats_and_text
+
 eval_all_models: eval_lr eval_cat eval_cat_feats_and_text eval_cat_text_only
 
+.PHONY: eval_lr eval_cat eval_cat_feats_and_text eval_cat_text_only \
+        eval_cat_text_only_and_tab_text eval_all_models
+
+################################################################################
+################################ Ablation Sweep ################################
+################################################################################
+
+# Run any target twice, once per DROP_YEAR value. Each sub-make re-expands
+# YEAR_TAG, so log filenames, eval dirs, and MLflow run names stay distinct
+# between the baseline and the no-year variant.
+#
+#   make sweep T=train_cat_feats_and_text
+#   make sweep T=eval_all_models
+#   make sweep T=train_cat_text_only_and_tab_text
+
+sweep:
+	@test -n "$(T)" || { echo "usage: make sweep T=<target>"; exit 1; }
+	$(MAKE) $(T) DROP_YEAR=0
+	$(MAKE) $(T) DROP_YEAR=1
+
+.PHONY: sweep
+
+################################################################################
+# Full text-model ablation pipeline: trains and evaluates all four runs
+# (cat_text_only and cat_feats_and_text, each with DROP_YEAR=0 and 1).
+# Uses recipe lines rather than prerequisites so train always completes
+# before eval, even under make -j.
+################################################################################
+
+modeling_text_ablation_pipeline:
+	$(MAKE) sweep T=train_cat_text_only_and_tab_text
+	$(MAKE) sweep T=eval_cat_text_only_and_tab_text
+
+.PHONY: modeling_text_ablation_pipeline
 
 .PHONY: save_predictions
 save_predictions:
@@ -415,6 +461,13 @@ bootstrap_eval:
 ################################ Modeling Pipeline #############################
 ### Shortcut to run full modeling pipeline: training, evaluation
 ################################################################################
+
+modeling_text_only_tab_text_eval_pipeline: train_cat_text_only_and_tab_text eval_cat_text_only_and_tab_text
+
+# Both variants: 4 models total (text_only and feats_and_text, each x2)
+modeling_text_only_tab_text_eval_pipeline_ablation:
+	$(MAKE) train_all_text_ablation
+	$(MAKE) eval_all_text_ablation
 
 modeling_train_eval_pipeline: train_all_models eval_all_models
 

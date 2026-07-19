@@ -40,6 +40,7 @@ print("#" * 80 + "\n")
 @app.command()
 def main(
     input_data_file: str = "./data/processed/df_sans_zero_missing.parquet",
+    output_data_file: str = "./data/processed/df_final.parquet",
     stage: str = "training",
     data_path: str = "./data/processed",
 ):
@@ -60,9 +61,12 @@ def main(
     print("\n" + "=" * 80)
     print("Loading preprocessed data...")
     print("=" * 80)
-
+    # load the input parquet file
     df = pd.read_parquet(input_data_file)
     print(f"Loaded shape: {df.shape}")
+    print(f"Saving final dataframe to: {output_data_file}")
+    # save out the final df before splitting into X,y
+    df.to_parquet(output_data_file)
 
     # Set index if not already set
     if df.index.name != var_index:

@@ -21,10 +21,10 @@ The NUFORC database contains decades of public UFO sighting reports submitted by
 The pipeline:
 
 1. Ingests scraped NUFORC report data.
-2. Engineers a combined set of structured and NLP-derived features from each report's free-text summary.
+2. Engineers a combined set of structured and NLP-derived features from each report's summary and full witness narrative.
 3. Trains and tunes several model families: logistic regression, CatBoost on tabular features, CatBoost on text features, CatBoost combining both, and a zero-/few-shot LLM classification baseline.
-4. Evaluates models with stratified cross-validation, average-precision scoring, and bootstrap confidence intervals.
-5. Generates SHAP explanations for individual predictions.
+4. Evaluates models with stratified splits, average-precision scoring, and bootstrap confidence intervals.
+5. Generates SHAP and LIME explanations for individual predictions.
 6. Serves predictions and explanations through a live dashboard.
 
 The work extends RAND's 2023 report *Not the X-Files*, which analyzed geographic and temporal patterns in NUFORC reports, by adding a content-aware dimension grounded in the language of the reports themselves.
@@ -49,6 +49,42 @@ The app is built on a Flask/Dash WSGI dispatcher (entry point: `app.py`) and let
 
 Each tabular model can be run under six pipeline variants that combine class-imbalance handling (`orig`, `smote`, `under`) with optional recursive feature elimination (`_rfe`). All runs are tracked with MLflow.
 
+## Configuration
+
+Pipeline behavior is controlled by a small set of Makefile variables. Each can be
+overridden on the command line, and each propagates into MLflow run names, log
+filenames, and evaluation output directories so that variants never collide.
+
+| Variable    | Default           | Purpose                                                                 |
+|-------------|-------------------|-------------------------------------------------------------------------|
+| `OUTCOME`   | `dramatic`        | Target label; also selects `data/processed/y_<outcome>.parquet`         |
+| `TEXT_COL`  | `full_text_clean` | Which text feature the text models consume                              |
+| `DROP_YEAR` | `0`               | `1` excludes `occurred_year` from the feature matrix (see Ablations)    |
+| `PIPELINES` | six variants      | Imbalance and RFE combinations applied to the tabular models            |
+| `SCORING`   | `average_precision` | Tuning and threshold-selection metric                                 |
+
+### Text column selection
+
+Text models are keyed by `TEXT_COL`, so `summary_clean` and `full_text_clean`
+runs are trained, logged, and evaluated independently rather than overwriting
+each other:
+
+```bash
+make train_cat_feats_and_text TEXT_COL=summary_clean
+make train_cat_feats_and_text TEXT_COL=full_text_clean
+```
+
+Tabular models (`lr`, `cat`) drop all text columns and are therefore identical
+regardless of `TEXT_COL`; they carry no text tag in their MLflow run names.
+
+### Ablations
+
+`occurred_year` is the single strongest SHAP feature, but the dramatic base rate
+swings from 3.6% in 2022 to 18.0% in 2024 to 2025, which reflects NUFORC's
+editorial annotation regime rather than anything about the sightings themselves.
+Setting `DROP_YEAR=1` excludes the column so the cost of that artifact can be
+quantified directly. Ablated runs receive a `_noyear` suffix throughout.
+
 ## Project structure
 
 ```
@@ -58,16 +94,24 @@ dusc_nuforc/
 │   ├── config.py
 │   ├── constants.py
 │   └── functions.py
-├── preprocessing/              # Data ingestion and feature engineering
-│   ├── 1_data_gen.py
-│   ├── 2_nlp_feature_engineer_nuforc.py
-│   ├── 3_nuforc_analytics.py
-│   ├── 4_preprocessing_remaining_feats.py
-│   └── 5_feat_gen.py
+├── preprocessing/              # Ingestion and feature engineering
+│   ├── step_00_NUFORC_Extractor.py
+│   ├── step_01_data_gen.py
+│   ├── step_03_nlp_feature_engineer_nuforc.py
+│   ├── step_04_nuforc_analytics.py
+│   ├── step_05_preprocessing_remaining_feats.py
+│   └── step_06_feat_gen.py
+├── debug_scripts/              # One-off maintenance, not part of the pipeline
+│   ├── backfill_summary_text.py
+│   ├── audit_truncation.py
+│   ├── prune_truncated_checkpoint.py
+│   ├── prune_all_questionable.py
+│   ├── summary_equals_full_text.py
+│   └── verify_fix.py
 ├── modeling/                   # Training, evaluation, explanation, inference
 │   ├── train.py                # LR + CatBoost training across pipeline variants
 │   ├── train_llm.py            # Zero-/few-shot LLM baseline
-│   ├── evaluate.py
+│   ├── evaluate.py             # Metrics, plots, SHAP, LIME
 │   ├── bootstrap_evaluation.py
 │   ├── save_predictions.py
 │   ├── explainer.py            # SHAP explainer fitting
@@ -77,10 +121,10 @@ dusc_nuforc/
 │   ├── data_exploration.ipynb
 │   └── performance_assessment.ipynb
 ├── models/                     # Trained models, predictions, evaluation artifacts
+│   ├── deploy/                 # Native CatBoost .cbm + calibration JSON
 │   ├── eval/
 │   ├── predictions/
-│   ├── results/
-│   └── train/
+│   └── results/
 ├── data/                       # Raw, interim, processed datasets (gitignored)
 ├── mlruns/                     # MLflow tracking store
 ├── Makefile                    # Pipeline orchestration
@@ -104,18 +148,71 @@ pip install -e .
 
 ## Running the pipeline
 
-The full pipeline is orchestrated through the `Makefile`. A typical end-to-end workflow:
+Everything is orchestrated through the `Makefile`. Run `make help` for the full
+target list.
+
+### Ingestion and preprocessing
+
+| Target                    | What it does                                                        |
+|---------------------------|---------------------------------------------------------------------|
+| `scrape_nuforc_details`   | Resumable detail scrape with checkpointing and rate limiting        |
+| `backfill_nuforc_text`    | Fills `Full_Text` from `Summary` for summary-only reports           |
+| `preproc_pipeline`        | Data generation, NLP features, analytics, preprocessing, feature gen |
+
+### Training
+
+| Target                             | What it does                                      |
+|------------------------------------|---------------------------------------------------|
+| `train_lr`                         | Logistic regression across all pipeline variants  |
+| `train_cat`                        | Tabular CatBoost across all pipeline variants     |
+| `train_cat_text_only`              | Text-only CatBoost                                |
+| `train_cat_feats_and_text`         | Tabular + text CatBoost                           |
+| `train_all_tabular`                | `train_lr` and `train_cat`                        |
+| `train_cat_text_only_and_tab_text` | Both text models                                  |
+| `train_all_models`                 | Everything                                        |
+
+### Evaluation
+
+| Target                            | What it does                                                    |
+|-----------------------------------|-----------------------------------------------------------------|
+| `eval_lr`, `eval_cat`             | Metrics and plots for the tabular models                        |
+| `eval_cat_text_only`              | Text-only model, with LIME                                      |
+| `eval_cat_feats_and_text`         | Tabular + text model, with SHAP and LIME                        |
+| `eval_cat_text_only_and_tab_text` | Both text models                                                |
+| `eval_all_models`                 | Everything                                                      |
+| `save_predictions`                | Writes scored predictions for the deployed app                  |
+| `bootstrap_eval`                  | 5,000-resample confidence intervals at each model's tuned threshold |
+
+### Ablation sweeps
+
+`sweep` runs any target twice, once per `DROP_YEAR` value. Each sub-invocation
+re-expands the tag, so baseline and no-year artifacts stay separate.
 
 ```bash
-# 1. Preprocessing: ingest, NLP feature engineering, analytics, feature generation
+make sweep T=train_cat_feats_and_text     # both variants of one model
+make sweep T=eval_all_models              # both variants of every evaluation
+```
+
+### Combined pipelines
+
+| Target                                     | What it does                                                        |
+|--------------------------------------------|---------------------------------------------------------------------|
+| `modeling_text_only_tab_text_eval_pipeline` | Trains and evaluates both text models at the current `DROP_YEAR`    |
+| `modeling_text_ablation_pipeline`           | Trains and evaluates both text models at `DROP_YEAR=0` and `1` (four models) |
+| `modeling_train_eval_pipeline`              | Trains and evaluates every model family                             |
+
+A typical end-to-end workflow:
+
+```bash
+# 1. Preprocessing
 make preproc_pipeline
 
-# 2. Train all models (LR, CatBoost variants, text-only, combined)
-make train_all_models
+# 2. Train and evaluate the text models, baseline and ablated
+make modeling_text_ablation_pipeline
 
-# 3. Evaluate models and bootstrap confidence intervals
-make eval_all_models
+# 3. Bootstrap confidence intervals and deployment predictions
 make bootstrap_eval
+make save_predictions
 
 # 4. Fit SHAP explainer and generate per-report explanations
 make model_explaining_training
@@ -130,7 +227,17 @@ For inference on a new batch of reports:
 make preproc_pipeline_inference
 ```
 
-Run `make help` for a full list of available targets.
+### A note on exit codes
+
+Every recipe pipes through `tee`, which masks the exit status of the underlying
+Python process. To make a failed training run halt a sweep rather than letting
+the evaluation phase proceed against a model that was never written, set the
+following near the top of the `Makefile`:
+
+```makefile
+SHELL := /bin/bash
+.SHELLFLAGS := -o pipefail -c
+```
 
 ## Data
 
@@ -161,7 +268,7 @@ Raw and processed data files are gitignored.
   </tr>
   <tr>
     <td width="160" valign="top" align="center">
-      <img src="https://raw.githubusercontent.com/datasciencedynamics/datasciencedynamics.github.io/main/photos/sean_torres.jpeg" width="140" alt="Oscar Gil">
+      <img src="https://raw.githubusercontent.com/datasciencedynamics/datasciencedynamics.github.io/main/photos/sean_torres.jpeg" width="140" alt="Sean Michael Torres">
     </td>
     <td valign="top">
       <b><a href="https://github.com/seantorres"> Sean Michael Torres, M.S.</a></b><br><br>

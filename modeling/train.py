@@ -82,8 +82,6 @@ def main(
     ablation_cols = ["occurred_year"] if drop_year else []
     X = X.drop(columns=ablation_cols, errors="ignore")
 
-    X.drop(columns=["occurred_year"], errors="ignore", inplace=True)
-
     # All candidate text columns. Only the selected text_col should survive into
     # X; any other text column must be dropped so it doesn't leak into the model
     # as an undeclared string feature.
