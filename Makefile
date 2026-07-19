@@ -460,24 +460,30 @@ bootstrap_eval:
 
 
 ################################################################################
-################################################################################
 ################################ BERT Fine-Tuning ##############################
 ################################################################################
 
-################################################################################
-################################ BERT Fine-Tuning ##############################
-################################################################################
-
-# Deliberately NOT $(TEXT_COL). The transformer takes raw narratives; the
-# cleaned column is stopword-stripped for CatBoost's BoW/BM25 calcers.
-BERT_TEXT_COL      ?= full_text_clean
+BERT_TEXT_COL      ?= $(TEXT_COL)
 BERT_MAX_LENGTH    ?= 512
+# TPESampler uses n_startup_trials=10 for random exploration before its model
+# engages, so anything at or below 10 is pure random search. 14 buys four
+# TPE-guided trials.
 BERT_N_TRIALS      ?= 15
 BERT_INPUT         ?= ./data/processed/df_final.parquet
 BERT_SKIP_OPTIMIZE ?= 0
 
+# BERTuner writes a checkpoint per trial to models/optuna_trial_N and only
+# prunes them in _cleanup_trials after the study completes. An interrupted run
+# leaves those behind, and since trial numbering restarts at 0, the next run
+# writes into stale directories. Always clear them before starting a study.
+.PHONY: clean_bert_trials
+clean_bert_trials:
+	@echo "Removing stale Optuna trial checkpoints ..."
+	@rm -rf models/optuna_trial_*
+	@echo "Done."
+
 .PHONY: train_bert
-train_bert:
+train_bert: clean_bert_trials
 	mkdir -p models/eval/$(OUTCOME)/bert models/results/$(OUTCOME)
 	$(PYTHON_INTERPRETER) $(PROJECT_DIRECTORY)/modeling/train_bert.py \
 		--features-path "$(BERT_INPUT)" \
@@ -492,10 +498,21 @@ train_bert:
 		--skip-optimize $(BERT_SKIP_OPTIMIZE) \
 	2>&1 | tee models/results/$(OUTCOME)/bert_$(BERT_TEXT_COL)_train.txt
 
-# Retrain from an existing study without repeating the Optuna search.
+# Retrain the final model from an existing study without repeating the search.
+# Does NOT clean trial checkpoints, since the best trial's weights are needed.
 .PHONY: train_bert_final_only
 train_bert_final_only:
-	$(MAKE) train_bert BERT_SKIP_OPTIMIZE=1
+	$(PYTHON_INTERPRETER) $(PROJECT_DIRECTORY)/modeling/train_bert.py \
+		--features-path "$(BERT_INPUT)" \
+		--models-dir ./models \
+		--text-col $(BERT_TEXT_COL) \
+		--outcome $(OUTCOME) \
+		--max-length $(BERT_MAX_LENGTH) \
+		--scoring avg_precision \
+		--tracking-uri ./mlruns \
+		--output-dir ./models/eval \
+		--skip-optimize 1 \
+	2>&1 | tee models/results/$(OUTCOME)/bert_$(BERT_TEXT_COL)_final.txt
 
 ################################ Modeling Pipeline #############################
 ### Shortcut to run full modeling pipeline: training, evaluation
