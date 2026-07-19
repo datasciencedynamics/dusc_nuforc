@@ -2,6 +2,19 @@
   <title>DUSC - Dramatic and Unusual Sightings Classifier</title>
   <desc>Circular radar logo with DUSC centered, a saucer drifting beneath it, tagline curving the bottom inside the rings</desc>
   <defs>
+    <linearGradient id="beamGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%"   stop-color="#9FE1CB" stop-opacity="0.95"/>
+      <stop offset="45%"  stop-color="#5DCAA5" stop-opacity="0.55"/>
+      <stop offset="100%" stop-color="#5DCAA5" stop-opacity="0.10"/>
+    </linearGradient>
+    <radialGradient id="poolGrad">
+      <stop offset="0%"   stop-color="#9FE1CB" stop-opacity="0.85"/>
+      <stop offset="100%" stop-color="#5DCAA5" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="beamGlow" x="-40%" y="-20%" width="180%" height="160%">
+      <feGaussianBlur stdDeviation="1.8"/>
+    </filter>
+    <clipPath id="innerDisc"><circle cx="200" cy="200" r="130"/></clipPath>
     <radialGradient id="glow9" cx="50%" cy="50%" r="50%">
       <stop offset="0%" stop-color="#1D9E75" stop-opacity="0.18"/>
       <stop offset="100%" stop-color="#1D9E75" stop-opacity="0"/>
@@ -13,13 +26,13 @@
       /* continuous figure-eight drift: x = 40 sin t, y = 12 sin 2t */
       @keyframes dusc-fly {
         0%    { transform: translate(0px,    0px); }
-        12.5% { transform: translate(28.3px, 12px); }
+        12.5% { transform: translate(28.3px, 6px); }
         25%   { transform: translate(40px,   0px); }
-        37.5% { transform: translate(28.3px,-12px); }
+        37.5% { transform: translate(28.3px,-6px); }
         50%   { transform: translate(0px,    0px); }
-        62.5% { transform: translate(-28.3px,12px); }
+        62.5% { transform: translate(-28.3px,6px); }
         75%   { transform: translate(-40px,  0px); }
-        87.5% { transform: translate(-28.3px,-12px); }
+        87.5% { transform: translate(-28.3px,-6px); }
         100%  { transform: translate(0px,    0px); }
       }
       /* banks into each turn, pivoting on its own hull */
@@ -35,15 +48,20 @@
         100%  { transform: rotate(0deg); }
       }
       @keyframes dusc-blink { 0%,100% { opacity: 1; } 50% { opacity: 0.25; } }
+      @keyframes dash-grow  { from { transform: scaleY(0); } }
+      @keyframes dash-shine { 0%,100% { opacity: .72; } 50% { opacity: 1; } }
 
       /* --- speed: lower the duration to fly faster, raise it to slow down --- */
       .dusc-fly  { animation: dusc-fly 7s linear infinite; }
       .dusc-bank { animation: dusc-bank 7s linear infinite;
                    transform-box: view-box; transform-origin: 200px 240px; }
       .dusc-lamp { animation: dusc-blink 1.1s ease-in-out infinite; }
+      .dash-bar  { transform-box: fill-box; transform-origin: bottom;
+                   animation: dash-grow 1s cubic-bezier(.2,.9,.2,1) backwards; }
+      .dash-beam { animation: dash-shine 2.6s ease-in-out infinite; }
 
       @media (prefers-reduced-motion: reduce) {
-        .dusc-fly, .dusc-bank, .dusc-lamp { animation: none; }
+        .dusc-fly, .dusc-bank, .dusc-lamp, .dash-bar, .dash-beam { animation: none; }
       }
     </style>
   </defs>
@@ -66,6 +84,31 @@
   <path d="M200,200 L200,72 A128,128 0 0,1 310,262 Z" fill="#1D9E75" opacity="0.07"/>
   <line x1="200" y1="200" x2="310" y2="262" stroke="#1D9E75" stroke-width="1" opacity="0.45"/>
   <line x1="200" y1="200" x2="200" y2="72"  stroke="#1D9E75" stroke-width="1" opacity="0.45"/>
+
+
+  <!-- the chart -->
+  <g>
+    <rect class="dash-bar" style="animation-delay:0.00s" x="142" y="290" width="16" height="22" rx="2.5" fill="#5DCAA5"/>
+    <rect class="dash-bar" style="animation-delay:0.09s" x="167" y="276" width="16" height="36" rx="2.5" fill="#1D9E75"/>
+    <rect class="dash-bar" style="animation-delay:0.18s" x="192" y="266" width="16" height="46" rx="2.5" fill="#0F6E56"/>
+    <rect class="dash-bar" style="animation-delay:0.27s" x="217" y="272" width="16" height="40" rx="2.5" fill="#1D9E75"/>
+    <rect class="dash-bar" style="animation-delay:0.36s" x="242" y="284" width="16" height="28" rx="2.5" fill="#5DCAA5"/>
+    <line x1="136" y1="315" x2="264" y2="315" stroke="#1D9E75" stroke-width="1.2" opacity="0.65"/>
+  </g>
+
+
+  <!-- the beam: same flight + bank as the saucer, but clipped to the radar disc -->
+  <g clip-path="url(#innerDisc)">
+    <g class="dusc-fly">
+      <g class="dusc-bank">
+        <g class="dash-beam" filter="url(#beamGlow)">
+          <path d="M186,250 L214,250 L246,318 L154,318 Z" fill="url(#beamGrad)"/>
+          <path d="M194,250 L206,250 L222,318 L178,318 Z" fill="#9FE1CB" opacity="0.45"/>
+          <ellipse cx="200" cy="316" rx="46" ry="9" fill="url(#poolGrad)"/>
+        </g>
+      </g>
+    </g>
+  </g>
 
   <!-- Saucer: drifts a figure-eight beneath the wordmark -->
   <g class="dusc-fly">
@@ -94,9 +137,8 @@
     <line x1="356" y1="200" x2="368" y2="200"/>
   </g>
 
-  <text x="200" y="195" text-anchor="middle"
-        font-family="'Helvetica Neue', Helvetica, Arial, sans-serif"
-        font-size="52" font-weight="700" fill="#1D9E75" letter-spacing="8">DUSC</text>
+  <text x="114.5" y="195" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif"
+        font-size="50" font-weight="700" fill="#1D9E75" letter-spacing="5">DUSC</text>
 
   <text font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="13" font-weight="700" fill="#1D9E75" letter-spacing="3.5">
     <textPath href="#tA7" startOffset="50%" text-anchor="middle">UAP SIGHTINGS CLASSIFICATIONS</textPath>
