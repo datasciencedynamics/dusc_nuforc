@@ -14,13 +14,27 @@
   </tr>
 </table>
 
+## Data attribution
+
+> **Data used in this study was provided by the National UFO Reporting Center (NUFORC) and is used with NUFORC's special permission.**
+
+This repository does not redistribute NUFORC report data. No report text, no
+database export, and no raw report files are committed here; the `data/`
+directory is gitignored in full.
+
+**Please do not scrape nuforc.org.** NUFORC is a small organization and
+automated traffic is a real burden on it. Direct data requests to NUFORC at
+[nuforc.org](https://nuforc.org). The permission covering this project is
+specific to Data Science Dynamics and does not extend to users of this
+repository.
+
 ## What this project does
 
 The NUFORC database contains decades of public UFO sighting reports submitted by witnesses across the United States and abroad. Most reports describe brief, mundane observations (lights in the sky, ambiguous shapes), while a small minority are highly dramatic narratives describing structured craft, occupants, sustained encounters, or other extraordinary content. This project builds models that score each report on a dramaticness scale and explains *why* a given report received the score it did.
 
 The pipeline:
 
-1. Ingests scraped NUFORC report data.
+1. Ingests NUFORC report data obtained under the permission described above.
 2. Engineers a combined set of structured and NLP-derived features from each report's summary and full witness narrative.
 3. Trains and tunes several model families: logistic regression, CatBoost on tabular features, CatBoost on text features, CatBoost combining both, and a zero-/few-shot LLM classification baseline.
 4. Evaluates models with stratified splits, average-precision scoring, and bootstrap confidence intervals.
@@ -29,13 +43,23 @@ The pipeline:
 
 The work extends RAND's 2023 report *Not the X-Files*, which analyzed geographic and temporal patterns in NUFORC reports, by adding a content-aware dimension grounded in the language of the reports themselves.
 
-## Live application
+## Live applications
 
-A live version of the dashboard is deployed at:
+Two applications are deployed:
 
 **[apps.datasciencedynamics.com/uap_classifier](https://apps.datasciencedynamics.com/uap_classifier)**
+Scores a sighting description that the visitor types in, estimating the
+probability that NUFORC would mark the report tier 1 or tier 2, and shows a LIME
+explanation of which words moved the score. It publishes no NUFORC reports.
 
-The app is built on a Flask/Dash WSGI dispatcher (entry point: `app.py`) and lets users browse scored reports, inspect per-report SHAP explanations, and explore aggregate patterns in dramaticness across regions, shapes, and report years.
+**[apps.datasciencedynamics.com/dusc_dash](https://apps.datasciencedynamics.com/dusc_dash)**
+Model performance dashboard: ROC and precision-recall curves, threshold sweep,
+calibration, subgroup performance, the year ablation, pairwise DeLong tests, and
+a map of model-versus-label agreement on the held-out test sample. The map shows
+approximate city-level coordinates and links back to the corresponding NUFORC
+reports; it does not reproduce report narratives.
+
+Both run in a single process behind a Flask/Dash WSGI dispatcher.
 
 ## Models
 
@@ -80,8 +104,11 @@ regardless of `TEXT_COL`; they carry no text tag in their MLflow run names.
 ### Ablations
 
 `occurred_year` is the single strongest SHAP feature, but the dramatic base rate
-swings from 3.6% in 2022 to 18.0% in 2024 to 2025, which reflects NUFORC's
-editorial annotation regime rather than anything about the sightings themselves.
+swings from 3.6% in 2022 to 18.0% in 2024 to 2025. Per NUFORC, that reflects
+changes in their review policy rather than anything about the sightings
+themselves: systematic tier 1 review began for reports submitted on or after
+17 March 2023, tier 2 was added as a second classification layer in October
+2024, and earlier reports were reviewed only when a specific case resurfaced.
 Setting `DROP_YEAR=1` excludes the column so the cost of that artifact can be
 quantified directly. Ablated runs receive a `_noyear` suffix throughout.
 
@@ -89,7 +116,6 @@ quantified directly. Ablated runs receive a `_noyear` suffix throughout.
 
 ```
 dusc_nuforc/
-├── app.py                      # Flask/Dash entry point for the dashboard
 ├── core/                       # Shared config, constants, and utility functions
 │   ├── config.py
 │   ├── constants.py
@@ -132,6 +158,9 @@ dusc_nuforc/
 └── setup.py
 ```
 
+The deployed Flask/Dash applications live in a separate repository; this one
+covers the data pipeline, modeling, and evaluation.
+
 ## Setup
 
 Requires Python 3.12.
@@ -153,9 +182,13 @@ target list.
 
 ### Ingestion and preprocessing
 
+The ingestion targets are retained for reproducibility of the authors' own
+permitted collection. They are not intended for reuse: see the data attribution
+notice above.
+
 | Target                    | What it does                                                        |
 |---------------------------|---------------------------------------------------------------------|
-| `scrape_nuforc_details`   | Resumable detail scrape with checkpointing and rate limiting        |
+| `nuforc_details`          | Resumable detail retrieval with checkpointing and rate limiting     |
 | `backfill_nuforc_text`    | Fills `Full_Text` from `Summary` for summary-only reports           |
 | `preproc_pipeline`        | Data generation, NLP features, analytics, preprocessing, feature gen |
 
@@ -241,9 +274,19 @@ SHELL := /bin/bash
 
 ## Data
 
-Source reports come from the [National UFO Reporting Center](https://nuforc.org). Note that the NUFORC site renders its tables via a JavaScript wpDataTables plugin, so direct `pandas.read_html()` does not work. Ingestion iterates the static per-month subindex pages at `nuforc.org/ndx/?id=event` with rate limiting.
+Source reports come from the
+[National UFO Reporting Center](https://nuforc.org), used with NUFORC's special
+permission as stated above. Raw and processed data files are gitignored and are
+not distributed with this repository.
 
-Raw and processed data files are gitignored.
+Reports carry a two-tier editorial classification applied by NUFORC staff. Per
+NUFORC, every report submitted on or after 17 March 2023 has been reviewed for
+tier 1 inclusion; tier 2 was added as a second classification layer in October
+2024; reports submitted before those dates were reviewed only where a specific
+case came up to be looked at again. NUFORC also began rejecting roughly a third
+of submissions outright in 2023, where before that nearly all submissions were
+published. Both facts bear directly on how the labels in this project should be
+interpreted, and both are documented in the analysis.
 
 ## Authors
 
@@ -282,10 +325,15 @@ Data Science Dynamics: [datasciencedynamics.com](https://datasciencedynamics.com
 
 ## References
 
-- Posard, M. N., Gromis, A., & Lee, M. (2023). *Not the X-Files: An Analysis of UFO Reporting in the United States.* RAND Corporation. https://www.rand.org/pubs/research_reports/RRA2475-1.html
+- Carlotto, M. (2021). *A preliminary analysis of historical UFO report data.* SSRN. https://doi.org/10.2139/ssrn.3857231
 - Medina, R. M., Brewer, S. C., & Kirkpatrick, S. M. (2023). An environmental analysis of public UAP sightings and sky view potential. *Scientific Reports*, 13, 22213. https://doi.org/10.1038/s41598-023-49527-x
 - National UFO Reporting Center: [nuforc.org](https://nuforc.org)
+- Posard, M. N., Gromis, A., & Lee, M. (2023). *Not the X-Files: Mapping Public Reports of Unidentified Aerial Phenomena Across America.* RAND Corporation (RR-A2475-1). https://www.rand.org/pubs/research_reports/RRA2475-1.html
 
 ## License
 
 Released under the [MIT License](LICENSE). Copyright (c) 2026 Leon Shpaner and Oscar Gil.
+
+The MIT licence covers the code in this repository only. It does not cover
+NUFORC report data, which is not distributed here and is not licensed for reuse
+by this project.
