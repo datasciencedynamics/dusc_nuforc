@@ -63,7 +63,7 @@ def main(
     n_trials: int = 15,
     scoring: str = "avg_precision",
     study_name: str = "",
-    tracking_uri: str = "./mlruns",
+    tracking_uri: str = "./mlruns/models",
     output_dir: Path = Path("./models/eval"),
     skip_optimize: int = 0,
 ):
