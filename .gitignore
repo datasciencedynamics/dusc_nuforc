@@ -177,3 +177,4 @@ notebooks/*.png
 notebooks/*.tiff
 **/images/.env*.cbm
 uap_calibration.json
+geo_maps/

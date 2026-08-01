@@ -5,6 +5,6 @@ setup(
     packages=find_packages(),
     version="0.1.0",
     description="cookie-cutter data science re-adapted to be used with the `dusc_nuforc` project.",
-    author="Leonid Shpaner, Oscar Gil",
+    author="Leonid Shpaner, Oscar Gil, Sean Michael Torres, Nicholas J Shpaner",
     license="MIT",
 )
