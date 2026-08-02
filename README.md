@@ -86,6 +86,7 @@ filenames, and evaluation output directories so that variants never collide.
 | `DROP_YEAR` | `0`               | `1` excludes `occurred_year` from the feature matrix (see Ablations)    |
 | `PIPELINES` | six variants      | Imbalance and RFE combinations applied to the tabular models            |
 | `SCORING`   | `average_precision` | Tuning and threshold-selection metric                                 |
+| `GEO_OUT`   | `./geo_maps`      | Destination root for downloaded map layers (see Geospatial assets)      |
 
 ### Text column selection
 
@@ -126,7 +127,9 @@ dusc_nuforc/
 │   ├── step_03_nlp_feature_engineer_nuforc.py
 │   ├── step_04_nuforc_analytics.py
 │   ├── step_05_preprocessing_remaining_feats.py
-│   └── step_06_feat_gen.py
+│   ├── step_06_feat_gen.py
+│   ├── step_07_build_eda_frame.py      # Joins raw and model frames for EDA
+│   └── step_08_download_geo_maps.py    # Fetches basemap shapefiles
 ├── debug_scripts/              # One-off maintenance, not part of the pipeline
 │   ├── backfill_summary_text.py
 │   ├── audit_truncation.py
@@ -144,7 +147,7 @@ dusc_nuforc/
 │   └── explanations_training.py
 ├── notebooks/
 │   ├── raw_data_exploration.ipynb
-│   ├── data_exploration.ipynb
+│   ├── data_exploration.ipynb  # Choropleths and point maps, needs geo_maps/
 │   └── performance_assessment.ipynb
 ├── models/                     # Trained models, predictions, evaluation artifacts
 │   ├── deploy/                 # Native CatBoost .cbm + calibration JSON
@@ -152,6 +155,9 @@ dusc_nuforc/
 │   ├── predictions/
 │   └── results/
 ├── data/                       # Raw, interim, processed datasets (gitignored)
+├── geo_maps/                   # Basemap shapefiles (gitignored, see below)
+│   ├── us/                     # Census TIGER state boundaries
+│   └── world/                  # Natural Earth country boundaries
 ├── mlruns/                     # MLflow tracking store
 ├── Makefile                    # Pipeline orchestration
 ├── requirements.txt
@@ -173,7 +179,77 @@ source nuforc_venv/bin/activate
 # Install dependencies
 pip install -r requirements.txt
 pip install -e .
+
+# Fetch the basemap shapefiles the EDA notebooks need
+make download_geo_maps
 ```
+
+## Geospatial assets
+
+The mapping cells in `notebooks/data_exploration.ipynb` draw sightings against
+US state and world country boundaries. Those basemaps are public-domain
+shapefiles from Census TIGER and Natural Earth, and they are **gitignored**
+rather than committed. Shapefiles are binary, so git stores each revision more
+or less in full and cannot delta-compress them; committing them inflates the
+repository permanently for everyone who clones it, and removing them later
+means rewriting history.
+
+Fetch them instead:
+
+```bash
+make download_geo_maps
+```
+
+The target wraps `preprocessing/step_08_download_geo_maps.py`, which pulls each
+layer, extracts the TIGER archive, and reads every resulting shapefile back
+through geopandas so a partial or corrupt download surfaces immediately rather
+than at plot time. It is idempotent: files already on disk are skipped unless
+`--force 1` is passed.
+
+| Layer                                     | Source                        | Lands in           |
+|-------------------------------------------|-------------------------------|--------------------|
+| `ne_110m_admin_0_countries`               | Natural Earth (GitHub mirror) | `geo_maps/world/`  |
+| `ne_110m_admin_0_boundary_lines_land`     | Natural Earth (GitHub mirror) | `geo_maps/world/`  |
+| `tl_2023_us_state`                        | Census TIGER 2023             | `geo_maps/us/`     |
+
+Natural Earth comes off the
+[`nvkelso/natural-earth-vector`](https://github.com/nvkelso/natural-earth-vector)
+mirror rather than naturalearthdata.com, which serves a malformed download URL
+and goes down periodically. Each layer is fetched as its component sidecar
+files: `.shp`, `.shx`, and `.dbf` are required to read the geometry, `.prj`
+carries the CRS, and `.cpg` is an optional encoding hint that does not exist for
+every theme.
+
+Overrides for scale, themes, and TIGER vintage:
+
+```bash
+make download_geo_maps GEO_SCALE=50m
+make download_geo_maps TIGER_VINTAGE=2024 TIGER_LAYERS="STATE COUNTY"
+make download_geo_maps GEO_OUT=/tmp/scratch_maps
+```
+
+### Use in the EDA notebook
+
+`notebooks/data_exploration.ipynb` reads the layers directly with geopandas.
+Paths are relative to the repository root, so launch Jupyter from the root
+rather than from inside `notebooks/`:
+
+```python
+import geopandas as gpd
+
+states = gpd.read_file("geo_maps/us/tl_2023_us_state.shp")
+world = gpd.read_file("geo_maps/world/ne_110m_admin_0_countries.shp")
+```
+
+Both arrive in EPSG:4326, matching the report coordinates, so no reprojection is
+needed before joining. The notebook uses them for the per-state sighting-rate
+choropleth, the point map of geocoded reports, and the world-boundary backdrop
+on the international-reports panel. If those cells raise a missing-file error on
+a fresh clone, `make download_geo_maps` has not been run yet.
+
+Note that geopandas removed the bundled `naturalearth_lowres` dataset in
+version 1.0. Older code calling `gpd.datasets.get_path("naturalearth_lowres")`
+should read from `geo_maps/world/` instead.
 
 ## Running the pipeline
 
@@ -191,6 +267,8 @@ notice above.
 | `nuforc_details`          | Resumable detail retrieval with checkpointing and rate limiting     |
 | `backfill_nuforc_text`    | Fills `Full_Text` from `Summary` for summary-only reports           |
 | `preproc_pipeline`        | Data generation, NLP features, analytics, preprocessing, feature gen |
+| `build_eda_frame`         | Joins the raw and model frames on `report_id` for notebook use      |
+| `download_geo_maps`       | Fetches and verifies the basemap shapefiles                         |
 
 ### Training
 
@@ -237,17 +315,23 @@ make sweep T=eval_all_models              # both variants of every evaluation
 A typical end-to-end workflow:
 
 ```bash
+# 0. Fetch basemaps (once per clone)
+make download_geo_maps
+
 # 1. Preprocessing
 make preproc_pipeline
 
-# 2. Train and evaluate the text models, baseline and ablated
+# 2. Build the joined frame the EDA notebook reads
+make build_eda_frame
+
+# 3. Train and evaluate the text models, baseline and ablated
 make modeling_text_ablation_pipeline
 
-# 3. Bootstrap confidence intervals and deployment predictions
+# 4. Bootstrap confidence intervals and deployment predictions
 make bootstrap_eval
 make save_predictions
 
-# 4. Fit SHAP explainer and generate per-report explanations
+# 5. Fit SHAP explainer and generate per-report explanations
 make model_explaining_training
 
 # Inspect MLflow runs
@@ -272,6 +356,29 @@ SHELL := /bin/bash
 .SHELLFLAGS := -o pipefail -c
 ```
 
+## Contributing
+
+Nothing derived belongs in version control. Before opening a pull request,
+confirm that no data files, model artifacts, shapefiles, virtual environments,
+or regenerated figures are staged:
+
+```bash
+git status --short
+git ls-files --others --exclude-standard
+```
+
+Adding a path to `.gitignore` does not untrack a file that is already committed.
+If something has slipped in, untrack it before pushing:
+
+```bash
+git rm -r --cached path/to/directory
+```
+
+The rule of thumb: if a script can regenerate it or a URL can fetch it, commit
+the script rather than the output. Cleaning a large binary out of the history
+after the fact requires `git filter-repo` and a force-push, which invalidates
+every existing clone.
+
 ## Data
 
 Source reports come from the
@@ -287,6 +394,10 @@ case came up to be looked at again. NUFORC also began rejecting roughly a third
 of submissions outright in 2023, where before that nearly all submissions were
 published. Both facts bear directly on how the labels in this project should be
 interpreted, and both are documented in the analysis.
+
+Basemap layers are separate from the report data and carry their own terms:
+Natural Earth is public domain, and Census TIGER/Line files are US Government
+works in the public domain. Neither is redistributed here.
 
 ## Authors
 
@@ -319,6 +430,16 @@ interpreted, and both are documented in the analysis.
     </td>
   </tr>
 
+  <tr>
+    <td width="160" valign="top" align="center">
+      <img src="https://raw.githubusercontent.com/datasciencedynamics/datasciencedynamics.github.io/main/Astro/public/photos/Nick_Shpaner.jpg" width="140" alt="Nicholas J. Shpaner">
+    </td>
+    <td valign="top">
+      <b><a href="https://github.com/nshpaner"> Nicholas J. Shpaner</a></b><br><br>
+      Nick is an aspiring Data Scientist, currently pursuing his Bachelor's degree at the University of California Merced. He currently works as a special projects assistant with UC Merced's Division of Undergraduate Education, and has experience in Python, R, and Excel. He has contributed to UAP research and analysis, as well as modeling search interest in Julian Apple Pie Company data.
+    </td>
+  </tr>
+
 </table>
 
 Data Science Dynamics: [datasciencedynamics.com](https://datasciencedynamics.com)
@@ -328,7 +449,9 @@ Data Science Dynamics: [datasciencedynamics.com](https://datasciencedynamics.com
 - Carlotto, M. (2021). *A preliminary analysis of historical UFO report data.* SSRN. https://doi.org/10.2139/ssrn.3857231
 - Medina, R. M., Brewer, S. C., & Kirkpatrick, S. M. (2023). An environmental analysis of public UAP sightings and sky view potential. *Scientific Reports*, 13, 22213. https://doi.org/10.1038/s41598-023-49527-x
 - National UFO Reporting Center: [nuforc.org](https://nuforc.org)
+- Natural Earth. *Free vector and raster map data at 1:10m, 1:50m, and 1:110m scales.* https://www.naturalearthdata.com
 - Posard, M. N., Gromis, A., & Lee, M. (2023). *Not the X-Files: Mapping Public Reports of Unidentified Aerial Phenomena Across America.* RAND Corporation (RR-A2475-1). https://www.rand.org/pubs/research_reports/RRA2475-1.html
+- US Census Bureau. *TIGER/Line Shapefiles.* https://www.census.gov/geographies/mapping-files/time-series/geo/tiger-line-file.html
 
 ## License
 

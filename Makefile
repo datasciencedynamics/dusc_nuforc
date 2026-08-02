@@ -289,36 +289,36 @@ data_gen:
 
 .PHONY: nlp_feature_engineer_nuforc
 nlp_feature_engineer_nuforc:
-	$(PYTHON_INTERPRETER) $(PROJECT_DIRECTORY)/preprocessing/step_03_nlp_feature_engineer_nuforc.py \
+	$(PYTHON_INTERPRETER) $(PROJECT_DIRECTORY)/preprocessing/step_02_nlp_feature_engineer_nuforc.py \
 		--input-parquet "./data/raw/nuforc_data.parquet" \
 		--output-parquet "./data/processed/nuforc_engineered.parquet" \
 		--output-metadata "./data/processed/nuforc_feature_metadata.json" \
-		2>&1 | tee ./data/processed/step_03_nlp_feature_engineer_nuforc.txt
+		2>&1 | tee ./data/processed/step_02_nlp_feature_engineer_nuforc.txt
 
 .PHONY: nuforc_analytics
 nuforc_analytics:
-	$(PYTHON_INTERPRETER) $(PROJECT_DIRECTORY)/preprocessing/step_04_nuforc_analytics.py \
+	$(PYTHON_INTERPRETER) $(PROJECT_DIRECTORY)/preprocessing/step_03_nuforc_analytics.py \
 		--input-parquet "./data/processed/nuforc_engineered.parquet" \
 		--output-parquet "./data/processed/NUFORC_enriched.parquet" \
-		2>&1 | tee ./data/processed/step_04_nuforc_analytics.txt
+		2>&1 | tee ./data/processed/step_03_nuforc_analytics.txt
 
 .PHONY: data_prep_preprocessing_training
 data_prep_preprocessing_training:
-	$(PYTHON_INTERPRETER) $(PROJECT_DIRECTORY)/preprocessing/step_05_preprocessing_remaining_feats.py \
+	$(PYTHON_INTERPRETER) $(PROJECT_DIRECTORY)/preprocessing/step_04_preprocessing_remaining_feats.py \
 		--input-data-file ./data/processed/NUFORC_enriched.parquet \
 		--output-data-file ./data/processed/df_sans_zero_missing.parquet \
 		--stage training \
 		--data-path ./data/processed \
-		2>&1 | tee ./data/processed/step_05_preprocessing_remaining_feats.txt
+		2>&1 | tee ./data/processed/step_04_preprocessing_remaining_feats.txt
 
 .PHONY: feat_gen_training
 feat_gen_training:
-	$(PYTHON_INTERPRETER) $(PROJECT_DIRECTORY)/preprocessing/step_06_feat_gen.py \
+	$(PYTHON_INTERPRETER) $(PROJECT_DIRECTORY)/preprocessing/step_05_feat_gen.py \
 		--input-data-file ./data/processed/df_sans_zero_missing.parquet \
 		--output-data-file ./data/processed/df_final.parquet \
 		--stage training \
 		--data-path ./data/processed \
-		2>&1 | tee ./data/processed/step_06_feat_gen_training.txt
+		2>&1 | tee ./data/processed/step_05_feat_gen_training.txt
 
 ################################################################################
 # EDA frame -- raw reports joined to engineered features
@@ -330,9 +330,17 @@ EDA_OUT    ?= ./data/processed/df_eda.parquet
 EDA_FORMAT ?= parquet
 EDA_HOW    ?= inner
 
+
+GEO_OUT ?= ./geo_maps
+GEO_SCALE ?= 110m
+GEO_THEMES ?= admin_0_countries admin_0_boundary_lines_land
+TIGER_VINTAGE ?= 2023
+TIGER_LAYERS ?= STATE
+
+
 .PHONY: build_eda_frame
 build_eda_frame:
-	$(PYTHON_INTERPRETER) $(PROJECT_DIRECTORY)/preprocessing/step_07_build_eda_frame.py \
+	$(PYTHON_INTERPRETER) $(PROJECT_DIRECTORY)/preprocessing/step_06_build_eda_frame.py \
 		--raw-path "$(EDA_RAW)" \
 		--model-path "$(EDA_MODEL)" \
 		--output-path "$(EDA_OUT)" \
@@ -340,14 +348,29 @@ build_eda_frame:
 		--join-key report_id \
 		--how $(EDA_HOW) \
 		--keep-index 1 \
-		2>&1 | tee ./data/processed/step_07_build_eda_frame.txt
+		2>&1 | tee ./data/processed/step_06_build_eda_frame.txt
+
+.PHONY: download_geo_maps
+download_geo_maps:
+	$(PYTHON_INTERPRETER) $(PROJECT_DIRECTORY)/preprocessing/step_07_download_geo_maps.py \
+		--output-path "$(GEO_OUT)" \
+		--world-subdir world \
+		--us-subdir us \
+		--ne-scale $(GEO_SCALE) \
+		--ne-themes $(GEO_THEMES) \
+		--tiger-vintage $(TIGER_VINTAGE) \
+		--tiger-layers $(TIGER_LAYERS) \
+		--force 0 \
+		--verify 1 \
+		2>&1 | tee ./data/processed/step_07_download_geo_maps.txt
 
 preproc_pipeline: data_gen \
                   nlp_feature_engineer_nuforc \
                   nuforc_analytics \
                   data_prep_preprocessing_training \
                   feat_gen_training \
-                  build_eda_frame
+                  build_eda_frame \
+				  download_geo_maps
 
 ################################################################################
 ################################# Training #####################################
