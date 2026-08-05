@@ -364,12 +364,47 @@ download_geo_maps:
 		--verify 1 \
 		2>&1 | tee ./data/processed/step_07_download_geo_maps.txt
 
+################################################################################
+# Geocoding backfill -- Census Gazetteer
+################################################################################
+
+GAZ_DIR       ?= ./geo_maps/gazetteer
+GAZ_VINTAGE   ?= 2023
+GEOCODE_IN    ?= ./data/processed/df_eda.parquet
+GEOCODE_OUT   ?= ./data/processed/df_eda_geocoded.parquet
+GEOCODE_UNMATCHED ?= ./data/processed/unmatched_place_pairs.csv
+
+.PHONY: regeocode_places
+regeocode_places:
+	$(PYTHON_INTERPRETER) $(PROJECT_DIRECTORY)/preprocessing/step_08_regeocode_places.py \
+		--input-path "$(GEOCODE_IN)" \
+		--output-path "$(GEOCODE_OUT)" \
+		--gaz-dir "$(GAZ_DIR)" \
+		--vintage $(GAZ_VINTAGE) \
+		--city-col City \
+		--state-col State \
+		--country-col Country \
+		--lat-col latitude \
+		--lon-col longitude \
+		--unmatched-csv "$(GEOCODE_UNMATCHED)" \
+		2>&1 | tee ./data/processed/step_08_regeocode_places.txt
+
+.PHONY: regeocode_places_force
+regeocode_places_force:
+	$(MAKE) regeocode_places GAZ_FORCE=1
+
+.PHONY: clean_gazetteer
+clean_gazetteer:
+	rm -rf $(GAZ_DIR)
+
 preproc_pipeline: data_gen \
                   nlp_feature_engineer_nuforc \
                   nuforc_analytics \
                   data_prep_preprocessing_training \
                   feat_gen_training \
                   build_eda_frame \
+				  download_geo_maps \
+				  regeocode_places \
 				  download_geo_maps
 
 ################################################################################
