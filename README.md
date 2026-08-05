@@ -36,10 +36,11 @@ The pipeline:
 
 1. Ingests NUFORC report data obtained under the permission described above.
 2. Engineers a combined set of structured and NLP-derived features from each report's summary and full witness narrative.
-3. Trains and tunes several model families: logistic regression, CatBoost on tabular features, CatBoost on text features, CatBoost combining both, and a zero-/few-shot LLM classification baseline.
-4. Evaluates models with stratified splits, average-precision scoring, and bootstrap confidence intervals.
-5. Generates SHAP and LIME explanations for individual predictions.
-6. Serves predictions and explanations through a live dashboard.
+3. Resolves report locations to coordinates against the Census Gazetteer.
+4. Trains and tunes several model families: logistic regression, CatBoost on tabular features, CatBoost on text features, CatBoost combining both, and a zero-/few-shot LLM classification baseline.
+5. Evaluates models with stratified splits, average-precision scoring, and bootstrap confidence intervals.
+6. Generates SHAP and LIME explanations for individual predictions.
+7. Serves predictions and explanations through a live dashboard.
 
 The work extends RAND's 2023 report *Not the X-Files*, which analyzed geographic and temporal patterns in NUFORC reports, by adding a content-aware dimension grounded in the language of the reports themselves.
 
@@ -70,6 +71,7 @@ Both run in a single process behind a Flask/Dash WSGI dispatcher.
 | `cat_text_only`      | CatBoost on free-text features only                                  |
 | `cat_feats_and_text` | CatBoost combining tabular and text features                         |
 | `train_llm`          | Zero-shot and few-shot LLM classification baseline                   |
+| `train_bert`         | BERT/RoBERTa fine-tuning with Optuna search                          |
 
 Each tabular model can be run under six pipeline variants that combine class-imbalance handling (`orig`, `smote`, `under`) with optional recursive feature elimination (`_rfe`). All runs are tracked with MLflow.
 
@@ -79,14 +81,17 @@ Pipeline behavior is controlled by a small set of Makefile variables. Each can b
 overridden on the command line, and each propagates into MLflow run names, log
 filenames, and evaluation output directories so that variants never collide.
 
-| Variable    | Default           | Purpose                                                                 |
-|-------------|-------------------|-------------------------------------------------------------------------|
-| `OUTCOME`   | `dramatic`        | Target label; also selects `data/processed/y_<outcome>.parquet`         |
-| `TEXT_COL`  | `full_text_clean` | Which text feature the text models consume                              |
-| `DROP_YEAR` | `0`               | `1` excludes `occurred_year` from the feature matrix (see Ablations)    |
-| `PIPELINES` | six variants      | Imbalance and RFE combinations applied to the tabular models            |
-| `SCORING`   | `average_precision` | Tuning and threshold-selection metric                                 |
-| `GEO_OUT`   | `./geo_maps`      | Destination root for downloaded map layers (see Geospatial assets)      |
+| Variable        | Default             | Purpose                                                              |
+|-----------------|---------------------|----------------------------------------------------------------------|
+| `OUTCOME`       | `dramatic`          | Target label; also selects `data/processed/y_<outcome>.parquet`      |
+| `TEXT_COL`      | `full_text_clean`   | Which text feature the text models consume                           |
+| `DROP_YEAR`     | `0`                 | `1` excludes `occurred_year` from the feature matrix (see Ablations) |
+| `PIPELINES`     | six variants        | Imbalance and RFE combinations applied to the tabular models         |
+| `SCORING`       | `average_precision` | Tuning and threshold-selection metric                                |
+| `GEO_OUT`       | `./geo_maps`        | Destination root for downloaded map layers (see Geospatial assets)   |
+| `GAZ_DIR`       | `./geo_maps/gazetteer` | Cache directory for Census Gazetteer files (see Geocoding)         |
+| `GAZ_VINTAGE`   | `2023`              | Gazetteer year used for coordinate resolution                        |
+| `BERT_N_TRIALS` | `14`                | Optuna trials; the TPE sampler explores randomly for the first 10    |
 
 ### Text column selection
 
@@ -117,6 +122,7 @@ quantified directly. Ablated runs receive a `_noyear` suffix throughout.
 
 ```
 dusc_nuforc/
+├── assets/                     # Logos and static images used by the README and apps
 ├── core/                       # Shared config, constants, and utility functions
 │   ├── config.py
 │   ├── constants.py
@@ -124,12 +130,13 @@ dusc_nuforc/
 ├── preprocessing/              # Ingestion and feature engineering
 │   ├── step_00_NUFORC_Extractor.py
 │   ├── step_01_data_gen.py
-│   ├── step_03_nlp_feature_engineer_nuforc.py
-│   ├── step_04_nuforc_analytics.py
-│   ├── step_05_preprocessing_remaining_feats.py
-│   ├── step_06_feat_gen.py
-│   ├── step_07_build_eda_frame.py      # Joins raw and model frames for EDA
-│   └── step_08_download_geo_maps.py    # Fetches basemap shapefiles
+│   ├── step_02_nlp_feature_engineer_nuforc.py
+│   ├── step_03_nuforc_analytics.py
+│   ├── step_04_preprocessing_remaining_feats.py
+│   ├── step_05_feat_gen.py
+│   ├── step_06_build_eda_frame.py      # Joins raw and model frames for EDA
+│   ├── step_07_download_geo_maps.py    # Fetches basemap shapefiles
+│   └── step_08_regeocode_places.py     # Resolves coordinates from the Census Gazetteer
 ├── debug_scripts/              # One-off maintenance, not part of the pipeline
 │   ├── backfill_summary_text.py
 │   ├── audit_truncation.py
@@ -139,26 +146,33 @@ dusc_nuforc/
 │   └── verify_fix.py
 ├── modeling/                   # Training, evaluation, explanation, inference
 │   ├── train.py                # LR + CatBoost training across pipeline variants
+│   ├── train_bert.py           # BERT/RoBERTa fine-tuning via bertuner
 │   ├── train_llm.py            # Zero-/few-shot LLM baseline
 │   ├── evaluate.py             # Metrics, plots, SHAP, LIME
 │   ├── bootstrap_evaluation.py
 │   ├── save_predictions.py
 │   ├── explainer.py            # SHAP explainer fitting
 │   └── explanations_training.py
+├── dashboard_prep/             # Artifacts staged for the deployed dashboard
 ├── notebooks/
 │   ├── raw_data_exploration.ipynb
-│   ├── data_exploration.ipynb  # Choropleths and point maps, needs geo_maps/
+│   ├── data_exploration.ipynb
+│   ├── geo_map.ipynb           # Choropleths, KDE surfaces, point maps; needs geo_maps/
+│   ├── mcartest.ipynb          # Missingness diagnostics
 │   └── performance_assessment.ipynb
 ├── models/                     # Trained models, predictions, evaluation artifacts
 │   ├── deploy/                 # Native CatBoost .cbm + calibration JSON
 │   ├── eval/
 │   ├── predictions/
 │   └── results/
+├── images/                     # Exported figures
 ├── data/                       # Raw, interim, processed datasets (gitignored)
-├── geo_maps/                   # Basemap shapefiles (gitignored, see below)
+├── geo_maps/                   # Basemap and gazetteer files (gitignored, see below)
 │   ├── us/                     # Census TIGER state boundaries
-│   └── world/                  # Natural Earth country boundaries
+│   ├── world/                  # Natural Earth country boundaries
+│   └── gazetteer/              # Census Gazetteer place and county-subdivision files
 ├── mlruns/                     # MLflow tracking store
+├── catboost_info/              # CatBoost training logs (gitignored)
 ├── Makefile                    # Pipeline orchestration
 ├── requirements.txt
 └── setup.py
@@ -184,15 +198,59 @@ pip install -e .
 make download_geo_maps
 ```
 
+## Geocoding
+
+Report locations arrive as free-text city and state strings rather than
+coordinates. The original resolution pass matched on city name alone, which
+produced two failure modes that are easy to miss because neither raises an
+error. Same-named places resolved across state and national borders, so Alma GA
+landed in Alma, Quebec and Burlington WA landed in Burlington, Ontario. And
+smaller places absent from the gazetteer silently returned nothing, leaving
+roughly 37% of reports with no coordinates at all.
+
+`make regeocode_places` re-resolves everything against the
+[Census Gazetteer](https://www.census.gov/geographies/reference-files/time-series/geo/gazetteer-files.html),
+keyed on normalized place name **plus** USPS state code. Both the place file and
+the county-subdivision file are loaded, with places taking priority and land
+area breaking ties, which covers incorporated cities, CDPs, and townships.
+
+| Measure                                    | Before | After |
+|--------------------------------------------|--------|-------|
+| Reports with coordinates                   | 62.7%  | 84.7% |
+| US rows matched to a state-verified place  | n/a    | 90.3% |
+| Coordinates newly resolved                 | n/a    | ~4,400 |
+| Coordinates corrected                      | n/a    | ~10,500 |
+
+Coordinate availability is stable across submission years (61.0% to 63.8% before
+the fix), so the missingness is unrelated to the annotation regime discussed
+under Ablations. What remains unmatched is concentrated in neighborhoods that
+are not places in their own right (Hollywood, Flushing, West Hills) and in
+consolidated city-county governments whose Gazetteer names carry administrative
+suffixes (Nashville, Lexington).
+
+The script reads and writes parquet or CSV based on file extension, preserves
+the original coordinates as `latitude_old` and `longitude_old`, and records
+provenance per row in a `geocode_source` column. Non-US rows are left untouched.
+Gazetteer downloads are cached under `GAZ_DIR` and skipped on later runs.
+
+```bash
+make regeocode_places                          # normal run, uses cached files
+make regeocode_places GAZ_VINTAGE=2024         # different Gazetteer year
+make clean_gazetteer && make regeocode_places   # force a fresh download
+```
+
+Unmatched city and state pairs are written to
+`data/processed/unmatched_place_pairs.csv` for inspection.
+
 ## Geospatial assets
 
-The mapping cells in `notebooks/data_exploration.ipynb` draw sightings against
-US state and world country boundaries. Those basemaps are public-domain
-shapefiles from Census TIGER and Natural Earth, and they are **gitignored**
-rather than committed. Shapefiles are binary, so git stores each revision more
-or less in full and cannot delta-compress them; committing them inflates the
-repository permanently for everyone who clones it, and removing them later
-means rewriting history.
+The mapping cells in `notebooks/geo_map.ipynb` draw sightings against US state
+and world country boundaries. Those basemaps are public-domain shapefiles from
+Census TIGER and Natural Earth, and they are **gitignored** rather than
+committed. Shapefiles are binary, so git stores each revision more or less in
+full and cannot delta-compress them; committing them inflates the repository
+permanently for everyone who clones it, and removing them later means rewriting
+history.
 
 Fetch them instead:
 
@@ -200,7 +258,7 @@ Fetch them instead:
 make download_geo_maps
 ```
 
-The target wraps `preprocessing/step_08_download_geo_maps.py`, which pulls each
+The target wraps `preprocessing/step_07_download_geo_maps.py`, which pulls each
 layer, extracts the TIGER archive, and reads every resulting shapefile back
 through geopandas so a partial or corrupt download surfaces immediately rather
 than at plot time. It is idempotent: files already on disk are skipped unless
@@ -211,6 +269,12 @@ than at plot time. It is idempotent: files already on disk are skipped unless
 | `ne_110m_admin_0_countries`               | Natural Earth (GitHub mirror) | `geo_maps/world/`  |
 | `ne_110m_admin_0_boundary_lines_land`     | Natural Earth (GitHub mirror) | `geo_maps/world/`  |
 | `tl_2023_us_state`                        | Census TIGER 2023             | `geo_maps/us/`     |
+| `2023_Gaz_place_national`                 | Census Gazetteer 2023         | `geo_maps/gazetteer/` |
+| `2023_Gaz_cousubs_national`               | Census Gazetteer 2023         | `geo_maps/gazetteer/` |
+
+The two Gazetteer files are fetched by `make regeocode_places` rather than by
+`make download_geo_maps`, since they are inputs to coordinate resolution rather
+than basemap layers.
 
 Natural Earth comes off the
 [`nvkelso/natural-earth-vector`](https://github.com/nvkelso/natural-earth-vector)
@@ -228,24 +292,34 @@ make download_geo_maps TIGER_VINTAGE=2024 TIGER_LAYERS="STATE COUNTY"
 make download_geo_maps GEO_OUT=/tmp/scratch_maps
 ```
 
-### Use in the EDA notebook
+### Use in the EDA notebooks
 
-`notebooks/data_exploration.ipynb` reads the layers directly with geopandas.
-Paths are relative to the repository root, so launch Jupyter from the root
-rather than from inside `notebooks/`:
+`notebooks/geo_map.ipynb` reads the layers directly with geopandas. Paths are
+relative to the notebook, so launch Jupyter from the repository root and read
+through `../`:
 
 ```python
 import geopandas as gpd
 
-states = gpd.read_file("geo_maps/us/tl_2023_us_state.shp")
-world = gpd.read_file("geo_maps/world/ne_110m_admin_0_countries.shp")
+states = gpd.read_file("../geo_maps/us/tl_2023_us_state.shp")
+world = gpd.read_file("../geo_maps/world/ne_110m_admin_0_countries.shp")
 ```
 
-Both arrive in EPSG:4326, matching the report coordinates, so no reprojection is
-needed before joining. The notebook uses them for the per-state sighting-rate
-choropleth, the point map of geocoded reports, and the world-boundary backdrop
-on the international-reports panel. If those cells raise a missing-file error on
-a fresh clone, `make download_geo_maps` has not been run yet.
+TIGER state files arrive in EPSG:4269 and Natural Earth in EPSG:4326, so
+reproject the basemap to match the report coordinates before joining:
+
+```python
+us_states = us_states.to_crs(gdf.crs)
+```
+
+Restrict points to CONUS with a spatial join against the state polygons rather
+than a latitude and longitude bounding box. A bounding box admits ocean points
+and Canadian border cities, which is how the original geocoding errors stayed
+invisible:
+
+```python
+us_gdf = gpd.sjoin(gdf, us_states[["geometry"]], how="inner", predicate="within")
+```
 
 Note that geopandas removed the bundled `naturalearth_lowres` dataset in
 version 1.0. Older code calling `gpd.datasets.get_path("naturalearth_lowres")`
@@ -264,10 +338,11 @@ notice above.
 
 | Target                    | What it does                                                        |
 |---------------------------|---------------------------------------------------------------------|
-| `nuforc_details`          | Resumable detail retrieval with checkpointing and rate limiting     |
+| `scrape_nuforc_details`   | Resumable detail retrieval with checkpointing and rate limiting     |
 | `backfill_nuforc_text`    | Fills `Full_Text` from `Summary` for summary-only reports           |
-| `preproc_pipeline`        | Data generation, NLP features, analytics, preprocessing, feature gen |
+| `preproc_pipeline`        | Data generation, NLP features, analytics, preprocessing, feature gen, EDA frame, geocoding, basemaps |
 | `build_eda_frame`         | Joins the raw and model frames on `report_id` for notebook use      |
+| `regeocode_places`        | Resolves coordinates against the Census Gazetteer                   |
 | `download_geo_maps`       | Fetches and verifies the basemap shapefiles                         |
 
 ### Training
@@ -278,9 +353,16 @@ notice above.
 | `train_cat`                        | Tabular CatBoost across all pipeline variants     |
 | `train_cat_text_only`              | Text-only CatBoost                                |
 | `train_cat_feats_and_text`         | Tabular + text CatBoost                           |
+| `train_bert`                       | BERT/RoBERTa fine-tuning with Optuna search       |
+| `train_bert_final_only`            | Retrains the best trial without repeating the search |
 | `train_all_tabular`                | `train_lr` and `train_cat`                        |
 | `train_cat_text_only_and_tab_text` | Both text models                                  |
 | `train_all_models`                 | Everything                                        |
+
+`train_bert` depends on `clean_bert_trials`, which removes stale
+`models/optuna_trial_*` checkpoints. Trial numbering restarts at zero on each
+study, so an interrupted run would otherwise leave directories that the next run
+writes into.
 
 ### Evaluation
 
@@ -321,17 +403,20 @@ make download_geo_maps
 # 1. Preprocessing
 make preproc_pipeline
 
-# 2. Build the joined frame the EDA notebook reads
+# 2. Build the joined frame the EDA notebooks read
 make build_eda_frame
 
-# 3. Train and evaluate the text models, baseline and ablated
+# 3. Resolve coordinates against the Census Gazetteer
+make regeocode_places
+
+# 4. Train and evaluate the text models, baseline and ablated
 make modeling_text_ablation_pipeline
 
-# 4. Bootstrap confidence intervals and deployment predictions
+# 5. Bootstrap confidence intervals and deployment predictions
 make bootstrap_eval
 make save_predictions
 
-# 5. Fit SHAP explainer and generate per-report explanations
+# 6. Fit SHAP explainer and generate per-report explanations
 make model_explaining_training
 
 # Inspect MLflow runs
@@ -359,8 +444,8 @@ SHELL := /bin/bash
 ## Contributing
 
 Nothing derived belongs in version control. Before opening a pull request,
-confirm that no data files, model artifacts, shapefiles, virtual environments,
-or regenerated figures are staged:
+confirm that no data files, model artifacts, shapefiles, gazetteer files,
+virtual environments, or regenerated figures are staged:
 
 ```bash
 git status --short
@@ -395,9 +480,16 @@ of submissions outright in 2023, where before that nearly all submissions were
 published. Both facts bear directly on how the labels in this project should be
 interpreted, and both are documented in the analysis.
 
-Basemap layers are separate from the report data and carry their own terms:
-Natural Earth is public domain, and Census TIGER/Line files are US Government
-works in the public domain. Neither is redistributed here.
+Report locations are city and state strings rather than coordinates. Coordinates
+are derived, not supplied by NUFORC, and are resolved to place centroids from
+the Census Gazetteer as described under Geocoding. Coverage is 84.7% of reports
+and is stable across submission years. Any spatial figure therefore describes a
+subset of the corpus, and figure captions should state the count rather than
+implying full coverage.
+
+Basemap and gazetteer layers are separate from the report data and carry their
+own terms: Natural Earth is public domain, and Census TIGER/Line and Gazetteer
+files are US Government works in the public domain. None is redistributed here.
 
 ## Authors
 
@@ -436,7 +528,7 @@ works in the public domain. Neither is redistributed here.
     </td>
     <td valign="top">
       <b><a href="https://github.com/nshpaner"> Nicholas J. Shpaner</a></b><br><br>
-      Nick is an aspiring Data Scientist, currently pursuing his Bachelor's degree at the University of California Merced. He currently works as a special projects assistant with UC Merced's Division of Undergraduate Education, and has experience in Python, R, and Excel. He has contributed to UAP research and analysis, as well as modeling search interest in Julian Apple Pie Company data.
+      Nick is an aspiring Data Scientist, currently pursuing his Bachelor's degree at the University of California Merced. He currently works as a special projects assistant with UC Merced's Division of Undergraduate Education, and has experience in Python, R, and Excel. He has contributed to UAP research and analysis, as well as modeling search interest in Julian Pie Company data.
     </td>
   </tr>
 
@@ -451,6 +543,7 @@ Data Science Dynamics: [datasciencedynamics.com](https://datasciencedynamics.com
 - National UFO Reporting Center: [nuforc.org](https://nuforc.org)
 - Natural Earth. *Free vector and raster map data at 1:10m, 1:50m, and 1:110m scales.* https://www.naturalearthdata.com
 - Posard, M. N., Gromis, A., & Lee, M. (2023). *Not the X-Files: Mapping Public Reports of Unidentified Aerial Phenomena Across America.* RAND Corporation (RR-A2475-1). https://www.rand.org/pubs/research_reports/RRA2475-1.html
+- US Census Bureau. *Gazetteer Files.* https://www.census.gov/geographies/reference-files/time-series/geo/gazetteer-files.html
 - US Census Bureau. *TIGER/Line Shapefiles.* https://www.census.gov/geographies/mapping-files/time-series/geo/tiger-line-file.html
 
 ## License
